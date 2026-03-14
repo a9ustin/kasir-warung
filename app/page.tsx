@@ -63,6 +63,8 @@ export default function KasirWarung() {
   const [newMenuPrice, setNewMenuPrice] = useState('');
   const [newMenuCategory, setNewMenuCategory] = useState('Nasi');
 
+  const [toastMessage, setToastMessage] = useState<string | null>(null);
+
   // --- FETCH & REALTIME ---
   useEffect(() => {
     fetchMenus();
@@ -75,6 +77,13 @@ export default function KasirWarung() {
 
     return () => { supabase.removeChannel(channel); };
   }, []);
+
+  const showToast = (message: string) => {
+    setToastMessage(message);
+    setTimeout(() => {
+      setToastMessage(null);
+    }, 3000); // Akan hilang otomatis dalam 3 detik
+  };
 
   const fetchMenus = async () => {
     const { data } = await supabase.from('menus').select('*').order('category', { ascending: true });
@@ -91,7 +100,7 @@ export default function KasirWarung() {
     const itemText = order.items.map(it => `- ${it.qty}x ${it.name} (Rp ${(it.qty * it.price).toLocaleString('id-ID')})`).join('\n');
     const text = `${itemText}\nTotal Rp ${order.total.toLocaleString('id-ID')}`;
     navigator.clipboard.writeText(text);
-    alert('Pesanan disalin!');
+    showToast('Pesanan disalin!');
   };
 
   // --- FUNGSI MASTER MENU ---
@@ -102,12 +111,12 @@ export default function KasirWarung() {
       setEditingMenuId(null);
       fetchMenus();
     } else {
-      alert('Gagal update harga');
+      showToast('Gagal update harga');
     }
   };
 
   const handleAddMenuToMaster = async () => {
-    if (!newMenuName || !newMenuPrice) return alert('Nama dan harga menu wajib diisi!');
+    if (!newMenuName || !newMenuPrice) return showToast('Nama dan harga menu wajib diisi!');
     const newMenu = { name: newMenuName, price: parseInt(newMenuPrice), category: newMenuCategory };
     const { data, error } = await supabase.from('menus').insert([newMenu]).select();
     if (!error && data) {
@@ -157,7 +166,7 @@ export default function KasirWarung() {
   };
 
   const submitOrder = async () => {
-    if (!customerName || cart.length === 0) return alert('Data belum lengkap!');
+    if (!customerName || cart.length === 0) return showToast('Data belum lengkap!');
     const orderData = {
       customer_name: customerName,
       order_note: orderNote,
@@ -174,7 +183,7 @@ export default function KasirWarung() {
     if (!error) {
       clearKasir();
       setActiveTab('TRACKER');
-    } else alert('Gagal memproses pesanan!');
+    } else showToast('Gagal memproses pesanan!');
   };
 
   // --- FUNGSI TRACKER & REKAP ---
