@@ -2,7 +2,6 @@
 import { useState, useEffect } from 'react';
 import { supabase } from './supabase';
 
-// --- CONFIG AESTHETIC GEN Z ---
 const THEME = {
   bg: 'bg-[#FAF9F6]',         
   primary: 'orange-600',       
@@ -87,7 +86,7 @@ export default function KasirWarung() {
     setToastMessage(message);
     setTimeout(() => {
       setToastMessage(null);
-    }, 1000); // Akan hilang otomatis dalam 3 detik
+    }, 1000); // Akan hilang otomatis dalam 1 detik
   };
 
   const fetchMenus = async () => {
@@ -278,17 +277,6 @@ export default function KasirWarung() {
                   <button key={c} onClick={() => setActiveCategory(c)} className={`px-5 py-2 rounded-full font-bold whitespace-nowrap border-2 transition-all ${activeCategory === c ? 'bg-orange-600 border-orange-600 text-white shadow-md' : 'bg-white border-gray-200 text-gray-600 hover:border-orange-300'}`}>{c}</button>
                 ))}
               </div>
-              {/* FITUR BARU: MENU DADAKAN */}
-              <div className="bg-orange-50 p-5 rounded-3xl border border-orange-100 mb-6 flex flex-col xl:flex-row gap-3 items-center shadow-sm">
-                <div className="font-black text-orange-800 whitespace-nowrap text-sm">⚡ Menu Dadakan:</div>
-                <div className="flex w-full gap-2">
-                  <input placeholder="Nama (Cth: Kerupuk)" value={customName} onChange={e => setCustomName(e.target.value)} className="w-full bg-white border-2 border-orange-200 text-sm p-3 rounded-xl outline-none focus:border-orange-600 font-bold" />
-                  <input placeholder="Harga" type="number" value={customPrice} onChange={e => setCustomPrice(e.target.value)} className="w-24 bg-white border-2 border-orange-200 text-sm p-3 rounded-xl outline-none focus:border-orange-600 font-bold" />
-                </div>
-                <button onClick={addCustomItemToCart} className="w-full xl:w-auto bg-orange-600 text-white font-black px-6 py-3 rounded-xl hover:bg-orange-700 transition-colors whitespace-nowrap text-xs shadow-md">
-                  + TAMBAH
-                </button>
-              </div>
               <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-4 gap-4 md:gap-5">
                 {filteredMenu.map(m => (
                   <div key={m.id} onClick={() => addToCart(m)} className="bg-white p-5 rounded-3xl border-2 border-gray-100 cursor-pointer hover:border-orange-600 shadow-sm transition-all active:scale-95 group relative flex flex-col justify-between h-full min-h-[140px]">
@@ -336,6 +324,24 @@ export default function KasirWarung() {
                 ))}
               </div>
 
+              <div className="bg-white p-3.5 rounded-2xl border-2 border-dashed border-orange-200 mb-4 flex flex-col gap-2">
+                <div className="font-black text-orange-600 text-[10px] uppercase tracking-wider">⚡ Menu Dadakan:</div>
+                <div className="flex gap-2">
+                  <input placeholder="Nama item..." value={customName} onChange={e => setCustomName(e.target.value)} className="w-full bg-gray-50 border border-gray-200 text-xs p-2.5 rounded-xl outline-none focus:border-orange-600 font-bold" />
+                  <input placeholder="Harga" type="number" value={customPrice} onChange={e => setCustomPrice(e.target.value)} className="w-24 bg-gray-50 border border-gray-200 text-xs p-2.5 rounded-xl outline-none focus:border-orange-600 font-bold" />
+                  <button onClick={addCustomItemToCart} className="bg-orange-600 text-white font-black px-4 py-2 rounded-xl hover:bg-orange-700 transition-colors text-xs shadow-sm">
+                    +
+                  </button>
+                </div>
+              </div>
+
+              <div className="bg-orange-50 p-4 rounded-2xl mb-6 flex justify-between items-center border border-orange-100">
+                <span className="text-sm font-bold text-orange-800">Metode Bayar:</span>
+                <select value={paymentMethod} onChange={e => setPaymentMethod(e.target.value as any)} className="text-sm font-bold p-1 rounded-lg border-2 border-orange-200 outline-none">
+                  <option value="Belum Bayar">⏳ Nanti</option><option value="Cash">💵 Cash</option><option value="QRIS">📱 QRIS</option>
+                </select>
+              </div>
+
               <div className="bg-orange-50 p-4 rounded-2xl mb-6 flex justify-between items-center border border-orange-100">
                 <span className="text-sm font-bold text-orange-800">Metode Bayar:</span>
                 <select value={paymentMethod} onChange={e => setPaymentMethod(e.target.value as any)} className="text-sm font-bold p-1 rounded-lg border-2 border-orange-200 outline-none">
@@ -381,7 +387,6 @@ export default function KasirWarung() {
                   .map(o => (
                   <div key={o.id} className="bg-gray-50 p-5 rounded-3xl border border-gray-100 mb-5 relative group shadow-sm">
                     
-                    {/* Tombol Edit, Batal, dan Copy WA ditumpuk di kanan atas */}
                     <div className="absolute top-4 right-4 flex flex-col gap-2 items-end z-10 opacity-100 md:opacity-0 md:group-hover:opacity-100 transition-opacity">
                       <div className="flex gap-2">
                         <button onClick={() => { setEditingOrderId(o.id); setCustomerName(o.customer_name); setCart(o.items); setOrderNote(o.order_note); setPaymentMethod(o.payment_method); setActiveTab('KASIR'); }} className="text-[10px] bg-yellow-500 text-white px-2 py-1 rounded-lg font-bold">Edit</button>
@@ -406,7 +411,6 @@ export default function KasirWarung() {
                            <div className="flex-1">
                              <div className="flex justify-between">
                                <p className={`text-sm font-bold ${it.isDone ? 'line-through text-gray-400' : 'text-gray-900'}`}>{it.qty}x {it.name}</p>
-                               {/* FITUR BARU: Harga per item di dapur */}
                                <span className="text-gray-400 font-medium text-[11px] mt-0.5">Rp {(it.qty * it.price).toLocaleString('id-ID')}</span>
                              </div>
                              <div className="flex gap-2 items-center mt-1">
@@ -418,7 +422,6 @@ export default function KasirWarung() {
                       ))}
                     </div>
 
-                    {/* FITUR BARU: Total Harga di dapur */}
                     <div className="flex justify-between items-center mt-3 mb-4 px-1 border-t border-gray-200 pt-3">
                        <span className="text-xs font-black text-gray-400 uppercase">Total Pay:</span>
                        <span className="text-lg font-black text-orange-600">Rp {o.total.toLocaleString('id-ID')}</span>
@@ -479,7 +482,6 @@ export default function KasirWarung() {
         {/* --- HALAMAN MASTER --- */}
         {activeTab === 'MASTER' && (
           <div className="bg-white p-8 rounded-[40px] shadow-sm border w-full">
-            {/* FITUR BARU: Search Master Menu */}
             <div className="flex flex-col md:flex-row justify-between items-center mb-8 gap-4">
               <h2 className="font-black text-3xl tracking-tighter">Manage <span className="text-orange-600">Master Menu</span></h2>
               <div className="w-full md:max-w-md">
@@ -510,7 +512,6 @@ export default function KasirWarung() {
               <table className="w-full text-left">
                 <thead className="bg-gray-50"><tr className="border-b-2 text-xs font-black text-gray-400 uppercase"><th className="p-5">Category</th><th className="p-5">Menu Name</th><th className="p-5">Price</th><th className="p-5 text-center">Action</th></tr></thead>
                 <tbody>
-                  {/* FITUR BARU: Filter masterSearch sebelum map */}
                   {menuList
                     .filter(m => m.name.toLowerCase().includes(masterSearch.toLowerCase()))
                     .sort((a,b) => a.category.localeCompare(b.category))
@@ -519,7 +520,6 @@ export default function KasirWarung() {
                       <td className="p-5"><span className="text-[10px] font-black bg-gray-100 text-gray-600 px-3 py-1 rounded-full uppercase">{m.category}</span></td>
                       <td className="p-5 font-black text-gray-900">{m.name}</td>
                       <td className="p-5 font-bold text-gray-600">
-                        {/* FITUR BARU: Conditional Render untuk Edit Harga */}
                         {editingMenuId === m.id ? (
                           <div className="flex gap-2">
                              <input type="number" className="border-2 border-orange-300 rounded-lg p-1 w-24 outline-none font-bold" value={editPrice} onChange={e => setEditPrice(e.target.value)} autoFocus />
@@ -542,13 +542,11 @@ export default function KasirWarung() {
           </div>
         )}
       </div>
-      {/* 👇 TAMBAHKAN KODE TOAST INI DI SINI 👇 */}
       {toastMessage && (
         <div className="fixed bottom-10 left-1/2 transform -translate-x-1/2 bg-gray-900 text-white px-6 py-3 rounded-full shadow-2xl z-[100] flex items-center gap-2 animate-bounce">
           <span className="font-bold text-sm">{toastMessage}</span>
         </div>
       )}
-      {/* 👆 SAMPAI SINI 👆 */}
     </div>
   );
 }
