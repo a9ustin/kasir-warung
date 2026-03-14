@@ -291,7 +291,7 @@ export default function KasirWarung() {
               </div>
             </div>
 
-            <div className={`xl:col-span-4 bg-white p-6 rounded-3xl border shadow-sm h-fit xl:sticky top-28`}>
+            <div className="xl:col-span-4 bg-white p-6 rounded-3xl border shadow-sm xl:sticky top-24 max-h-[85vh] overflow-y-auto">
               <h2 className="font-extrabold text-2xl mb-6 border-b pb-4 flex justify-between items-center">
                 <span>Check <span className="text-orange-600">Order</span></span>
                 {editingOrderId && <span className="text-xs bg-orange-100 text-orange-700 px-3 py-1 rounded-full animate-pulse">Edit Mode</span>}
