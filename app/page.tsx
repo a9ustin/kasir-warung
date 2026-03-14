@@ -46,6 +46,11 @@ export default function KasirWarung() {
   const [activeCategory, setActiveCategory] = useState('All');
   const [recapFilter, setRecapFilter] = useState<'Hari Ini' | 'Minggu Ini' | 'Semua'>('Hari Ini');
 
+  // FITUR BARU: State Master Menu Edit & Search
+  const [masterSearch, setMasterSearch] = useState('');
+  const [editingMenuId, setEditingMenuId] = useState<string | null>(null);
+  const [editPrice, setEditPrice] = useState<string>('');
+
   // State Kasir
   const [cart, setCart] = useState<CartItem[]>([]);
   const [customerName, setCustomerName] = useState('');
@@ -81,7 +86,26 @@ export default function KasirWarung() {
     if (data) setOrders(data);
   };
 
+  // --- FITUR BARU: COPY WA ---
+  const copyToClipboard = (order: Order) => {
+    const itemText = order.items.map(it => `- ${it.qty}x ${it.name} (Rp ${(it.qty * it.price).toLocaleString('id-ID')})`).join('\n');
+    const text = `*PESANAN WARUNG*\nNama: ${order.customer_name}\n\n${itemText}\n\n*Total: Rp ${order.total.toLocaleString('id-ID')}*\nMetode: ${order.payment_method}\nCatatan: ${order.order_note || '-'}`;
+    navigator.clipboard.writeText(text);
+    alert('Pesanan disalin! Tinggal paste di WhatsApp.');
+  };
+
   // --- FUNGSI MASTER MENU ---
+  // FITUR BARU: Update Harga
+  const handleUpdatePrice = async (id: string) => {
+    const { error } = await supabase.from('menus').update({ price: parseInt(editPrice) }).eq('id', id);
+    if (!error) {
+      setEditingMenuId(null);
+      fetchMenus();
+    } else {
+      alert('Gagal update harga');
+    }
+  };
+
   const handleAddMenuToMaster = async () => {
     if (!newMenuName || !newMenuPrice) return alert('Nama dan harga menu wajib diisi!');
     const newMenu = { name: newMenuName, price: parseInt(newMenuPrice), category: newMenuCategory };
@@ -174,7 +198,7 @@ export default function KasirWarung() {
     await supabase.from('orders').update({ items: newItems }).eq('id', orderId);
   };
 
-  // LOGIKA REKAP
+  // LOGIKA REKAP (TIDAK ADA YANG DIHAPUS)
   const recapOrders = orders.filter(o => {
     const d = new Date(o.created_at);
     const now = new Date();
@@ -221,7 +245,7 @@ export default function KasirWarung() {
               </div>
               <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-4 gap-4 md:gap-5">
                 {filteredMenu.map(m => (
-                  <div key={m.id} onClick={() => addToCart(m)} className="bg-white p-5 rounded-3xl border-2 border-gray-100 cursor-pointer hover:border-orange-600 shadow-sm transition-all active:scale-95 group relative flex flex-col justify-between">
+                  <div key={m.id} onClick={() => addToCart(m)} className="bg-white p-5 rounded-3xl border-2 border-gray-100 cursor-pointer hover:border-orange-600 shadow-sm transition-all active:scale-95 group relative flex flex-col justify-between h-full min-h-[140px]">
                     <div>
                       <span className="text-[10px] font-bold bg-orange-100 text-orange-600 px-3 py-1 rounded-full">{m.category}</span>
                       <p className="font-bold text-base md:text-lg mt-3 leading-tight group-hover:text-black">{m.name}</p>
@@ -288,32 +312,54 @@ export default function KasirWarung() {
           </div>
         )}
 
-        {/* --- HALAMAN TRACKER --- */}
+        {/* --- HALAMAN TRACKER (DAPUR) --- */}
         {activeTab === 'TRACKER' && (
           <div className="grid grid-cols-1 md:grid-cols-3 gap-8">
             {(['To Do', 'In Progress', 'Done'] as const).map(status => (
               <div key={status} className="bg-white p-6 rounded-3xl border min-h-[60vh] shadow-sm">
                 <h3 className="font-black text-xl mb-6 border-b pb-4 flex justify-between items-center">
                   {status === 'To Do' ? '📝 Antrean' : status === 'In Progress' ? '🍳 Dimasak' : '✅ Selesai'}
-                  <span className="bg-orange-100 text-orange-600 px-3 rounded-full text-sm">{orders.filter(o => o.status === status).length}</span>
+                  <span className="bg-orange-100 text-orange-600 px-3 rounded-full text-sm">
+                    {orders.filter(o => {
+                      if (status !== 'Done') return o.status === status;
+                      return o.status === 'Done' && new Date(o.created_at).toDateString() === new Date().toDateString();
+                    }).length}
+                  </span>
                 </h3>
-                {orders.filter(o => o.status === status).map(o => (
+                {orders
+                  .filter(o => {
+                    // FILTER SELESAI: Hanya yang hari ini
+                    if (status !== 'Done') return o.status === status;
+                    return o.status === 'Done' && new Date(o.created_at).toDateString() === new Date().toDateString();
+                  })
+                  .map(o => (
                   <div key={o.id} className="bg-gray-50 p-5 rounded-3xl border border-gray-100 mb-5 relative group shadow-sm">
-                    <div className="absolute top-4 right-4 flex gap-2 opacity-100 md:opacity-0 md:group-hover:opacity-100 transition-opacity">
+                    <div className="absolute top-4 right-4 flex gap-2 opacity-100 md:opacity-0 md:group-hover:opacity-100 transition-opacity z-10">
                       <button onClick={() => { setEditingOrderId(o.id); setCustomerName(o.customer_name); setCart(o.items); setOrderNote(o.order_note); setPaymentMethod(o.payment_method); setActiveTab('KASIR'); }} className="text-[10px] bg-yellow-500 text-white px-2 py-1 rounded-lg font-bold">Edit</button>
                       <button onClick={() => deleteOrder(o.id)} className="text-[10px] bg-red-600 text-white px-2 py-1 rounded-lg font-bold">Batal</button>
                     </div>
-                    <p className="font-black text-xl text-gray-900 pr-16 leading-tight">{o.customer_name}</p>
-                    <select value={o.payment_method} onChange={e => updatePayment(o.id, e.target.value)} className={`text-[10px] font-bold p-1 rounded-lg border mt-2 mb-4 ${o.payment_method === 'Belum Bayar' ? 'bg-red-50 text-red-600' : 'bg-green-50 text-green-700'}`}>
+                    
+                    <div className="flex justify-between items-start mb-2 pr-16">
+                      <p className="font-black text-xl text-gray-900 leading-tight">{o.customer_name}</p>
+                      {/* FITUR BARU: Tombol Copy WA */}
+                      <button onClick={() => copyToClipboard(o)} className="bg-green-100 text-green-700 px-2 py-1 rounded-lg font-black text-[10px] hover:bg-green-200 transition-colors shrink-0 z-10">📋 COPY WA</button>
+                    </div>
+
+                    <select value={o.payment_method} onChange={e => updatePayment(o.id, e.target.value)} className={`text-[10px] font-bold p-1 rounded-lg border mt-2 mb-4 outline-none ${o.payment_method === 'Belum Bayar' ? 'bg-red-50 text-red-600 border-red-200' : 'bg-green-50 text-green-700 border-green-200'}`}>
                        <option value="Belum Bayar">Belum Lunas</option><option value="Cash">Lunas (Cash)</option><option value="QRIS">Lunas (QRIS)</option>
                     </select>
+                    
                     <div className="space-y-2 mb-5 bg-white p-3 rounded-xl border border-gray-100">
                       {o.items.map((it, i) => (
                         <div key={i} className="flex items-start gap-2">
                            <input type="checkbox" checked={it.isDone} onChange={() => toggleItemDone(o.id, i)} className="mt-1 w-4 h-4 rounded text-orange-600 focus:ring-orange-500" />
                            <div className="flex-1">
-                             <p className={`text-sm font-bold ${it.isDone ? 'line-through text-gray-400' : 'text-gray-900'}`}>{it.qty}x {it.name}</p>
-                             <div className="flex gap-2 items-center">
+                             <div className="flex justify-between">
+                               <p className={`text-sm font-bold ${it.isDone ? 'line-through text-gray-400' : 'text-gray-900'}`}>{it.qty}x {it.name}</p>
+                               {/* FITUR BARU: Harga per item di dapur */}
+                               <span className="text-gray-400 font-medium text-[11px] mt-0.5">Rp {(it.qty * it.price).toLocaleString('id-ID')}</span>
+                             </div>
+                             <div className="flex gap-2 items-center mt-1">
                                <span className={`text-[9px] font-bold px-1 rounded ${it.orderType === 'Take Away' ? 'bg-orange-100 text-orange-600' : 'bg-green-100 text-green-600'}`}>{it.orderType}</span>
                                {it.note && <span className="text-[10px] text-red-500 font-medium italic">-{it.note}</span>}
                              </div>
@@ -321,6 +367,13 @@ export default function KasirWarung() {
                         </div>
                       ))}
                     </div>
+
+                    {/* FITUR BARU: Total Harga di dapur */}
+                    <div className="flex justify-between items-center mt-3 mb-4 px-1 border-t border-gray-200 pt-3">
+                       <span className="text-xs font-black text-gray-400 uppercase">Total Pay:</span>
+                       <span className="text-lg font-black text-orange-600">Rp {o.total.toLocaleString('id-ID')}</span>
+                    </div>
+
                     <div className="flex gap-2">
                       {status === 'To Do' && <button onClick={() => updateStatus(o.id, 'In Progress')} className="flex-1 bg-orange-600 text-white py-3 rounded-xl font-black text-xs">Gas Masak 🔥</button>}
                       {status === 'In Progress' && <button onClick={() => updateStatus(o.id, 'Done')} className="flex-1 bg-green-600 text-white py-3 rounded-xl font-black text-xs">Siap Saji ✅</button>}
@@ -376,7 +429,14 @@ export default function KasirWarung() {
         {/* --- HALAMAN MASTER --- */}
         {activeTab === 'MASTER' && (
           <div className="bg-white p-8 rounded-[40px] shadow-sm border w-full">
-            <h2 className="font-black text-3xl mb-8 tracking-tighter">Manage <span className="text-orange-600">Master Menu</span></h2>
+            {/* FITUR BARU: Search Master Menu */}
+            <div className="flex flex-col md:flex-row justify-between items-center mb-8 gap-4">
+              <h2 className="font-black text-3xl tracking-tighter">Manage <span className="text-orange-600">Master Menu</span></h2>
+              <div className="w-full md:max-w-md">
+                 <ModernInput placeholder="🔍 Cari nama menu di sini..." value={masterSearch} onChange={e => setMasterSearch(e.target.value)} className="bg-gray-50" />
+              </div>
+            </div>
+
             <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-10 bg-gray-50 p-6 rounded-3xl border border-gray-100">
               <div>
                 <label className="text-[10px] font-black uppercase text-gray-500 mb-2 block ml-2">Kategori</label>
@@ -400,11 +460,29 @@ export default function KasirWarung() {
               <table className="w-full text-left">
                 <thead className="bg-gray-50"><tr className="border-b-2 text-xs font-black text-gray-400 uppercase"><th className="p-5">Category</th><th className="p-5">Menu Name</th><th className="p-5">Price</th><th className="p-5 text-center">Action</th></tr></thead>
                 <tbody>
-                  {menuList.sort((a,b) => a.category.localeCompare(b.category)).map(m => (
+                  {/* FITUR BARU: Filter masterSearch sebelum map */}
+                  {menuList
+                    .filter(m => m.name.toLowerCase().includes(masterSearch.toLowerCase()))
+                    .sort((a,b) => a.category.localeCompare(b.category))
+                    .map(m => (
                     <tr key={m.id} className="border-b hover:bg-gray-50 transition-colors">
                       <td className="p-5"><span className="text-[10px] font-black bg-gray-100 text-gray-600 px-3 py-1 rounded-full uppercase">{m.category}</span></td>
                       <td className="p-5 font-black text-gray-900">{m.name}</td>
-                      <td className="p-5 font-bold text-gray-600">Rp {m.price.toLocaleString('id-ID')}</td>
+                      <td className="p-5 font-bold text-gray-600">
+                        {/* FITUR BARU: Conditional Render untuk Edit Harga */}
+                        {editingMenuId === m.id ? (
+                          <div className="flex gap-2">
+                             <input type="number" className="border-2 border-orange-300 rounded-lg p-1 w-24 outline-none font-bold" value={editPrice} onChange={e => setEditPrice(e.target.value)} autoFocus />
+                             <button onClick={() => handleUpdatePrice(m.id)} className="bg-green-500 text-white px-3 py-1 rounded-lg text-xs font-black shadow-sm">OK</button>
+                             <button onClick={() => setEditingMenuId(null)} className="bg-gray-400 text-white px-2 py-1 rounded-lg text-xs">✕</button>
+                          </div>
+                        ) : (
+                          <div className="flex items-center gap-3">
+                             <span className="text-base">Rp {m.price.toLocaleString('id-ID')}</span>
+                             <button onClick={() => { setEditingMenuId(m.id); setEditPrice(m.price.toString()); }} className="text-blue-500 text-[10px] font-black uppercase hover:underline">✏️ Edit</button>
+                          </div>
+                        )}
+                      </td>
                       <td className="p-5 text-center"><button onClick={() => handleDeleteMenuFromMaster(m.id)} className="text-red-500 hover:bg-red-50 px-4 py-2 rounded-xl transition-colors font-black text-xs uppercase">Hapus 🗑️</button></td>
                     </tr>
                   ))}
