@@ -152,7 +152,7 @@ export default function KasirWarung() {
       newCart[idx].qty += 1;
       setCart(newCart);
     } else {
-      setCart([...cart, { ...item, qty: 1, note: '', isDone: false, orderType: 'Dine In' }]);
+      setCart([...cart, { ...item, qty: 1, note: '', isDone: false, orderType: 'Take Away' }]);
     }
   };
 
@@ -168,7 +168,7 @@ export default function KasirWarung() {
       note: '',
       isDone: false,
       isCustom: true,
-      orderType: 'Dine In'
+      orderType: 'Take Away'
     };
     
     setCart([...cart, newItem]);
@@ -316,7 +316,8 @@ export default function KasirWarung() {
                     </div>
                     <div className="flex gap-2 mt-3 items-center">
                       <select value={item.orderType} onChange={e => { const n = [...cart]; n[idx].orderType = e.target.value as any; setCart(n); }} className={`text-[10px] font-bold p-2 rounded-xl outline-none cursor-pointer border ${item.orderType === 'Take Away' ? 'bg-orange-100 text-orange-700' : 'bg-green-100 text-green-700'}`}>
-                        <option value="Dine In">🍽 Makan Sini</option><option value="Take Away">🛍 Bungkus</option>
+                        <option value="Take Away">🛍 Bungkus</option>
+                        <option value="Dine In">🍽 Makan Sini</option>
                       </select>
                       <input placeholder="Catatan item..." className="w-full bg-white border border-gray-200 p-2 rounded-xl text-xs outline-none focus:border-red-400" value={item.note} onChange={e => { const n = [...cart]; n[idx].note = e.target.value; setCart(n); }} />
                     </div>
