@@ -89,9 +89,9 @@ export default function KasirWarung() {
   // --- FITUR BARU: COPY WA ---
   const copyToClipboard = (order: Order) => {
     const itemText = order.items.map(it => `- ${it.qty}x ${it.name} (Rp ${(it.qty * it.price).toLocaleString('id-ID')})`).join('\n');
-    const text = `*PESANAN WARUNG*\nNama: ${order.customer_name}\n\n${itemText}\n\n*Total: Rp ${order.total.toLocaleString('id-ID')}*\nMetode: ${order.payment_method}\nCatatan: ${order.order_note || '-'}`;
+    const text = `${itemText}\nTotal Rp ${order.total.toLocaleString('id-ID')}`;
     navigator.clipboard.writeText(text);
-    alert('Pesanan disalin! Tinggal paste di WhatsApp.');
+    alert('Pesanan disalin!');
   };
 
   // --- FUNGSI MASTER MENU ---
@@ -334,15 +334,19 @@ export default function KasirWarung() {
                   })
                   .map(o => (
                   <div key={o.id} className="bg-gray-50 p-5 rounded-3xl border border-gray-100 mb-5 relative group shadow-sm">
-                    <div className="absolute top-4 right-4 flex gap-2 opacity-100 md:opacity-0 md:group-hover:opacity-100 transition-opacity z-10">
-                      <button onClick={() => { setEditingOrderId(o.id); setCustomerName(o.customer_name); setCart(o.items); setOrderNote(o.order_note); setPaymentMethod(o.payment_method); setActiveTab('KASIR'); }} className="text-[10px] bg-yellow-500 text-white px-2 py-1 rounded-lg font-bold">Edit</button>
-                      <button onClick={() => deleteOrder(o.id)} className="text-[10px] bg-red-600 text-white px-2 py-1 rounded-lg font-bold">Batal</button>
+                    
+                    {/* Tombol Edit, Batal, dan Copy WA ditumpuk di kanan atas */}
+                    <div className="absolute top-4 right-4 flex flex-col gap-2 items-end z-10 opacity-100 md:opacity-0 md:group-hover:opacity-100 transition-opacity">
+                      <div className="flex gap-2">
+                        <button onClick={() => { setEditingOrderId(o.id); setCustomerName(o.customer_name); setCart(o.items); setOrderNote(o.order_note); setPaymentMethod(o.payment_method); setActiveTab('KASIR'); }} className="text-[10px] bg-yellow-500 text-white px-2 py-1 rounded-lg font-bold">Edit</button>
+                        <button onClick={() => deleteOrder(o.id)} className="text-[10px] bg-red-600 text-white px-2 py-1 rounded-lg font-bold">Batal</button>
+                      </div>
+                      <button onClick={() => copyToClipboard(o)} className="bg-green-100 text-green-700 px-2 py-1 rounded-lg font-black text-[10px] hover:bg-green-200 transition-colors shrink-0">📋 COPY WA</button>
                     </div>
                     
-                    <div className="flex justify-between items-start mb-2 pr-16">
+                    {/* Nama Customer */}
+                    <div className="flex justify-between items-start mb-2 pr-20">
                       <p className="font-black text-xl text-gray-900 leading-tight">{o.customer_name}</p>
-                      {/* FITUR BARU: Tombol Copy WA */}
-                      <button onClick={() => copyToClipboard(o)} className="bg-green-100 text-green-700 px-2 py-1 rounded-lg font-black text-[10px] hover:bg-green-200 transition-colors shrink-0 z-10">📋 COPY WA</button>
                     </div>
 
                     <select value={o.payment_method} onChange={e => updatePayment(o.id, e.target.value)} className={`text-[10px] font-bold p-1 rounded-lg border mt-2 mb-4 outline-none ${o.payment_method === 'Belum Bayar' ? 'bg-red-50 text-red-600 border-red-200' : 'bg-green-50 text-green-700 border-green-200'}`}>
