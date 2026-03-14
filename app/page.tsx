@@ -63,7 +63,12 @@ export default function KasirWarung() {
   const [newMenuPrice, setNewMenuPrice] = useState('');
   const [newMenuCategory, setNewMenuCategory] = useState('Nasi');
 
+  // State Toast Notification
   const [toastMessage, setToastMessage] = useState<string | null>(null);
+
+  // State Menu Dadakan
+  const [customName, setCustomName] = useState('');
+  const [customPrice, setCustomPrice] = useState('');
 
   // --- FETCH & REALTIME ---
   useEffect(() => {
@@ -150,6 +155,27 @@ export default function KasirWarung() {
     } else {
       setCart([...cart, { ...item, qty: 1, note: '', isDone: false, orderType: 'Dine In' }]);
     }
+  };
+
+  const addCustomItemToCart = () => {
+    if (!customName || !customPrice) return showToast('Nama & harga menu dadakan wajib diisi! ⚠️');
+    
+    const newItem: CartItem = {
+      id: `custom-${Date.now()}`,
+      name: customName,
+      price: parseInt(customPrice),
+      category: 'Dadakan',
+      qty: 1,
+      note: '',
+      isDone: false,
+      isCustom: true,
+      orderType: 'Dine In'
+    };
+    
+    setCart([...cart, newItem]);
+    setCustomName('');
+    setCustomPrice('');
+    showToast(`${customName} masuk keranjang! 🛒`);
   };
 
   const updateQty = (idx: number, delta: number) => {
@@ -251,6 +277,17 @@ export default function KasirWarung() {
                 {categories.map(c => (
                   <button key={c} onClick={() => setActiveCategory(c)} className={`px-5 py-2 rounded-full font-bold whitespace-nowrap border-2 transition-all ${activeCategory === c ? 'bg-orange-600 border-orange-600 text-white shadow-md' : 'bg-white border-gray-200 text-gray-600 hover:border-orange-300'}`}>{c}</button>
                 ))}
+              </div>
+              {/* FITUR BARU: MENU DADAKAN */}
+              <div className="bg-orange-50 p-5 rounded-3xl border border-orange-100 mb-6 flex flex-col xl:flex-row gap-3 items-center shadow-sm">
+                <div className="font-black text-orange-800 whitespace-nowrap text-sm">⚡ Menu Dadakan:</div>
+                <div className="flex w-full gap-2">
+                  <input placeholder="Nama (Cth: Kerupuk)" value={customName} onChange={e => setCustomName(e.target.value)} className="w-full bg-white border-2 border-orange-200 text-sm p-3 rounded-xl outline-none focus:border-orange-600 font-bold" />
+                  <input placeholder="Harga" type="number" value={customPrice} onChange={e => setCustomPrice(e.target.value)} className="w-24 bg-white border-2 border-orange-200 text-sm p-3 rounded-xl outline-none focus:border-orange-600 font-bold" />
+                </div>
+                <button onClick={addCustomItemToCart} className="w-full xl:w-auto bg-orange-600 text-white font-black px-6 py-3 rounded-xl hover:bg-orange-700 transition-colors whitespace-nowrap text-xs shadow-md">
+                  + TAMBAH
+                </button>
               </div>
               <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-4 gap-4 md:gap-5">
                 {filteredMenu.map(m => (
