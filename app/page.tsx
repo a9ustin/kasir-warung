@@ -342,13 +342,6 @@ export default function KasirWarung() {
                 </select>
               </div>
 
-              <div className="bg-orange-50 p-4 rounded-2xl mb-6 flex justify-between items-center border border-orange-100">
-                <span className="text-sm font-bold text-orange-800">Metode Bayar:</span>
-                <select value={paymentMethod} onChange={e => setPaymentMethod(e.target.value as any)} className="text-sm font-bold p-1 rounded-lg border-2 border-orange-200 outline-none">
-                  <option value="Belum Bayar">⏳ Nanti</option><option value="Cash">💵 Cash</option><option value="QRIS">📱 QRIS</option>
-                </select>
-              </div>
-
               <div className="border-t pt-5">
                 <div className="flex justify-between items-end text-3xl font-black mb-6 tracking-tighter">
                   <span className="text-base text-gray-500 font-bold">Total Pay:</span><span className="text-orange-600">Rp {totalCart.toLocaleString('id-ID')}</span>
