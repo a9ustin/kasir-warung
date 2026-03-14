@@ -82,7 +82,7 @@ export default function KasirWarung() {
     setToastMessage(message);
     setTimeout(() => {
       setToastMessage(null);
-    }, 3000); // Akan hilang otomatis dalam 3 detik
+    }, 1000); // Akan hilang otomatis dalam 3 detik
   };
 
   const fetchMenus = async () => {
