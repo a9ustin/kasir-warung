@@ -24,11 +24,10 @@ type Order = {
   items: CartItem[]; 
   total: number; 
   status: 'To Do' | 'In Progress' | 'Done';
-  payment_method: 'Belum Bayar' | 'Cash' | 'QRIS';
+  payment_method: 'Belum Bayar' | 'Cash' | 'QRIS Mandiri' | 'QRIS Gopay';
   created_at: string;
 };
 
-// PERBAIKAN: Komponen Input di luar fungsi utama agar tidak lose focus
 const ModernInput = (props: React.InputHTMLAttributes<HTMLInputElement>) => (
   <input {...props} className={`w-full bg-gray-50 border-gray-200 border-2 ${THEME.secondary} text-base p-3.5 rounded-2xl outline-none focus:border-${THEME.primary} transition-colors placeholder:text-gray-400 ${props.className}`} />
 );
@@ -45,7 +44,7 @@ export default function KasirWarung() {
   const [activeCategory, setActiveCategory] = useState('All');
   const [recapFilter, setRecapFilter] = useState<'Hari Ini' | 'Minggu Ini' | 'Semua'>('Hari Ini');
 
-  // FITUR BARU: State Master Menu Edit & Search
+  // State Master Menu Edit & Search
   const [masterSearch, setMasterSearch] = useState('');
   const [editingMenuId, setEditingMenuId] = useState<string | null>(null);
   const [editPrice, setEditPrice] = useState<string>('');
@@ -54,7 +53,8 @@ export default function KasirWarung() {
   const [cart, setCart] = useState<CartItem[]>([]);
   const [customerName, setCustomerName] = useState('');
   const [orderNote, setOrderNote] = useState('');
-  const [paymentMethod, setPaymentMethod] = useState<'Belum Bayar' | 'Cash' | 'QRIS'>('Belum Bayar');
+  // Default payment state
+  const [paymentMethod, setPaymentMethod] = useState<'Belum Bayar' | 'Cash' | 'QRIS Mandiri' | 'QRIS Gopay'>('Belum Bayar');
   const [editingOrderId, setEditingOrderId] = useState<string | null>(null);
 
   // State Master Menu Input
@@ -99,16 +99,16 @@ export default function KasirWarung() {
     if (data) setOrders(data);
   };
 
-  // --- FITUR BARU: COPY WA ---
+  // COPY WA
   const copyToClipboard = (order: Order) => {
     const itemText = order.items.map(it => `- ${it.qty}x ${it.name} (Rp ${(it.qty * it.price).toLocaleString('id-ID')})`).join('\n');
-    const text = `${itemText}\nTotal Rp ${order.total.toLocaleString('id-ID')}`;
+    const text = `${itemText}\nTotal Rp ${order.total.toLocaleString('id-ID')}\n\n*Terima Kasih!* 🙏`;
     navigator.clipboard.writeText(text);
     showToast('Pesanan disalin!');
   };
 
   // --- FUNGSI MASTER MENU ---
-  // FITUR BARU: Update Harga
+  // Update Harga
   const handleUpdatePrice = async (id: string) => {
     const { error } = await supabase.from('menus').update({ price: parseInt(editPrice) }).eq('id', id);
     if (!error) {
@@ -232,7 +232,7 @@ export default function KasirWarung() {
     await supabase.from('orders').update({ items: newItems }).eq('id', orderId);
   };
 
-  // LOGIKA REKAP (TIDAK ADA YANG DIHAPUS)
+  // LOGIKA REKAP
   const recapOrders = orders.filter(o => {
     const d = new Date(o.created_at);
     const now = new Date();
@@ -243,7 +243,8 @@ export default function KasirWarung() {
 
   const revenue = recapOrders.filter(o => o.payment_method !== 'Belum Bayar').reduce((s, o) => s + o.total, 0);
   const cash = recapOrders.filter(o => o.payment_method === 'Cash').reduce((s, o) => s + o.total, 0);
-  const qris = recapOrders.filter(o => o.payment_method === 'QRIS').reduce((s, o) => s + o.total, 0);
+  const qrisMandiri = recapOrders.filter(o => o.payment_method === 'QRIS Mandiri').reduce((s, o) => s + o.total, 0);
+  const qrisGopay = recapOrders.filter(o => o.payment_method === 'QRIS Gopay').reduce((s, o) => s + o.total, 0);
 
   return (
     <div className={`min-h-screen ${THEME.bg} ${THEME.secondary} font-sans pb-10`}>
@@ -339,7 +340,10 @@ export default function KasirWarung() {
               <div className="bg-orange-50 p-4 rounded-2xl mb-6 flex justify-between items-center border border-orange-100">
                 <span className="text-sm font-bold text-orange-800">Metode Bayar:</span>
                 <select value={paymentMethod} onChange={e => setPaymentMethod(e.target.value as any)} className="text-sm font-bold p-1 rounded-lg border-2 border-orange-200 outline-none">
-                  <option value="Belum Bayar">⏳ Nanti</option><option value="Cash">💵 Cash</option><option value="QRIS">📱 QRIS</option>
+                  <option value="Belum Bayar">⏳ Nanti</option>
+                  <option value="Cash">💵 Cash</option>
+                  <option value="QRIS Mandiri">📱 QRIS Mandiri</option>
+                  <option value="QRIS Gopay">📱 QRIS Gopay</option>
                 </select>
               </div>
 
@@ -374,7 +378,6 @@ export default function KasirWarung() {
                 </h3>
                 {orders
                   .filter(o => {
-                    // FILTER SELESAI: Hanya yang hari ini
                     if (status !== 'Done') return o.status === status;
                     return o.status === 'Done' && new Date(o.created_at).toDateString() === new Date().toDateString();
                   })
@@ -395,7 +398,10 @@ export default function KasirWarung() {
                     </div>
 
                     <select value={o.payment_method} onChange={e => updatePayment(o.id, e.target.value)} className={`text-[10px] font-bold p-1 rounded-lg border mt-2 mb-4 outline-none ${o.payment_method === 'Belum Bayar' ? 'bg-red-50 text-red-600 border-red-200' : 'bg-green-50 text-green-700 border-green-200'}`}>
-                       <option value="Belum Bayar">Belum Lunas</option><option value="Cash">Lunas (Cash)</option><option value="QRIS">Lunas (QRIS)</option>
+                       <option value="Belum Bayar">Belum Lunas</option>
+                       <option value="Cash">Lunas (Cash)</option>
+                       <option value="QRIS Mandiri">Lunas (QRIS Mandiri)</option>
+                       <option value="QRIS Gopay">Lunas (QRIS Gopay)</option>
                     </select>
                     
                     <div className="space-y-2 mb-5 bg-white p-3 rounded-xl border border-gray-100">
@@ -441,29 +447,50 @@ export default function KasirWarung() {
                 <option value="Hari Ini">Hari Ini</option><option value="Minggu Ini">Minggu Ini</option><option value="Semua">Semua Waktu</option>
               </select>
             </div>
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-8 mb-10">
-              <div className="bg-white p-8 rounded-[40px] shadow-sm border border-gray-100 text-center flex flex-col items-center">
-                <p className="text-gray-400 font-bold text-xs uppercase mb-2 tracking-widest">Total Omzet</p>
-                <p className="text-3xl font-black text-green-600">Rp {revenue.toLocaleString('id-ID')}</p>
+
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-4 md:gap-8 mb-10">
+              <div className="bg-white p-6 rounded-3xl shadow-sm border border-gray-100 text-center flex flex-col items-center">
+                <p className="text-gray-400 font-bold text-[10px] uppercase mb-1 tracking-widest">Total Omzet</p>
+                <p className="text-2xl font-black text-green-600">Rp {revenue.toLocaleString('id-ID')}</p>
               </div>
-              <div className="bg-white p-8 rounded-[40px] shadow-sm border border-gray-100 text-center flex flex-col items-center">
-                <p className="text-gray-400 font-bold text-xs uppercase mb-2 tracking-widest">Via QRIS</p>
-                <p className="text-3xl font-black text-blue-600">Rp {qris.toLocaleString('id-ID')}</p>
+              <div className="bg-white p-6 rounded-3xl shadow-sm border border-gray-100 text-center flex flex-col items-center">
+                <p className="text-gray-400 font-bold text-[10px] uppercase mb-1 tracking-widest">Cash</p>
+                <p className="text-2xl font-black text-orange-600">Rp {cash.toLocaleString('id-ID')}</p>
               </div>
-              <div className="bg-white p-8 rounded-[40px] shadow-sm border border-gray-100 text-center flex flex-col items-center">
-                <p className="text-gray-400 font-bold text-xs uppercase mb-2 tracking-widest">Via Cash</p>
-                <p className="text-3xl font-black text-orange-600">Rp {cash.toLocaleString('id-ID')}</p>
+              <div className="bg-white p-6 rounded-3xl shadow-sm border border-gray-100 text-center flex flex-col items-center">
+                <p className="text-gray-400 font-bold text-[10px] uppercase mb-1 tracking-widest">Mandiri</p>
+                <p className="text-2xl font-black text-blue-600">Rp {qrisMandiri.toLocaleString('id-ID')}</p>
+              </div>
+              <div className="bg-white p-6 rounded-3xl shadow-sm border border-gray-100 text-center flex flex-col items-center">
+                <p className="text-gray-400 font-bold text-[10px] uppercase mb-1 tracking-widest">Gopay</p>
+                <p className="text-2xl font-black text-blue-400">Rp {qrisGopay.toLocaleString('id-ID')}</p>
               </div>
             </div>
-            <div className="bg-white rounded-3xl border overflow-hidden shadow-sm">
+
+            <div className="bg-white rounded-3xl border shadow-sm">
                <table className="w-full text-left">
-                  <thead className="bg-gray-50"><tr className="text-[10px] font-black uppercase text-gray-500"><th className="p-4">Waktu</th><th className="p-4">Customer</th><th className="p-4">Metode</th><th className="p-4 text-right">Total</th></tr></thead>
+                  <thead className="bg-gray-50"><tr className="text-[10px] font-black uppercase text-gray-500 border-b"><th className="p-4 rounded-tl-3xl">Waktu</th><th className="p-4">Customer</th><th className="p-4">Metode</th><th className="p-4 text-right rounded-tr-3xl">Total</th></tr></thead>
                   <tbody>
                     {recapOrders.map(o => (
                       <tr key={o.id} className="border-b hover:bg-orange-50/30 transition-colors">
                         <td className="p-4 text-xs font-bold text-gray-400">{new Date(o.created_at).toLocaleTimeString('id-ID', {hour:'2-digit', minute:'2-digit'})}</td>
-                        <td className="p-4 font-black text-sm">{o.customer_name}</td>
-                        <td className="p-4"><span className={`text-[10px] font-bold px-2 py-1 rounded-lg ${o.payment_method === 'QRIS' ? 'bg-blue-100 text-blue-700' : 'bg-orange-100 text-orange-700'}`}>{o.payment_method}</span></td>
+                        
+                        {/* Hover Detail Pesanan */}
+                        <td className="p-4 relative group cursor-pointer">
+                          <span className="font-black text-sm border-b border-dashed border-gray-400 pb-0.5">{o.customer_name}</span>
+                          {/* Tooltip Hover Box */}
+                          <div className="absolute left-4 top-full mt-1 w-56 bg-white border border-gray-200 shadow-xl rounded-2xl p-4 z-50 hidden group-hover:flex flex-col gap-1">
+                             <p className="text-[9px] font-black text-gray-400 uppercase tracking-widest border-b pb-2 mb-1">Detail Pesanan</p>
+                             {o.items.map((it, i) => (
+                               <div key={i} className="flex justify-between text-xs font-bold text-gray-700">
+                                 <span>{it.qty}x {it.name}</span>
+                                 <span className="text-gray-400">Rp {(it.qty * it.price).toLocaleString('id-ID')}</span>
+                               </div>
+                             ))}
+                          </div>
+                        </td>
+
+                        <td className="p-4"><span className={`text-[10px] font-bold px-2 py-1 rounded-lg ${o.payment_method.includes('QRIS') ? 'bg-blue-100 text-blue-700' : 'bg-orange-100 text-orange-700'}`}>{o.payment_method}</span></td>
                         <td className="p-4 text-right font-bold text-sm">Rp {o.total.toLocaleString('id-ID')}</td>
                       </tr>
                     ))}
@@ -487,7 +514,8 @@ export default function KasirWarung() {
               <div>
                 <label className="text-[10px] font-black uppercase text-gray-500 mb-2 block ml-2">Kategori</label>
                 <select value={newMenuCategory} onChange={e => setNewMenuCategory(e.target.value)} className="w-full bg-white p-3.5 rounded-2xl border-2 border-gray-200 font-bold outline-none focus:border-orange-600">
-                   <option>Nasi</option><option>Ala Carte</option><option>Snack</option><option>Minuman</option><option>Tambahan</option>
+                   {/* Tambah Rokok & Sembako */}
+                   <option>Nasi</option><option>Ala Carte</option><option>Snack</option><option>Minuman</option><option>Tambahan</option><option>Rokok</option><option>Sembako</option>
                 </select>
               </div>
               <div>
