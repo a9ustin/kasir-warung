@@ -505,6 +505,13 @@ export default function KasirWarung() {
           </div>
         )}
       </div>
+      {/* 👇 TAMBAHKAN KODE TOAST INI DI SINI 👇 */}
+      {toastMessage && (
+        <div className="fixed bottom-10 left-1/2 transform -translate-x-1/2 bg-gray-900 text-white px-6 py-3 rounded-full shadow-2xl z-[100] flex items-center gap-2 animate-bounce">
+          <span className="font-bold text-sm">{toastMessage}</span>
+        </div>
+      )}
+      {/* 👆 SAMPAI SINI 👆 */}
     </div>
   );
 }
