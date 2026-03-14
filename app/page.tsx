@@ -28,6 +28,7 @@ type Order = {
   created_at: string;
 };
 
+// PERBAIKAN: Komponen Input di luar fungsi utama agar tidak lose focus
 const ModernInput = (props: React.InputHTMLAttributes<HTMLInputElement>) => (
   <input {...props} className={`w-full bg-gray-50 border-gray-200 border-2 ${THEME.secondary} text-base p-3.5 rounded-2xl outline-none focus:border-${THEME.primary} transition-colors placeholder:text-gray-400 ${props.className}`} />
 );
@@ -39,21 +40,22 @@ export default function KasirWarung() {
   const [menuList, setMenuList] = useState<MenuItem[]>([]);
   const [orders, setOrders] = useState<Order[]>([]);
   
-  // State Filter & Search
+  // State Filter & Search Kasir
   const [searchQuery, setSearchQuery] = useState('');
   const [activeCategory, setActiveCategory] = useState('All');
   const [recapFilter, setRecapFilter] = useState<'Hari Ini' | 'Minggu Ini' | 'Semua'>('Hari Ini');
 
-  // State Master Menu Edit & Search
+  // FITUR BARU: State Master Menu Edit & Filter Kategori
   const [masterSearch, setMasterSearch] = useState('');
+  const [masterCategoryFilter, setMasterCategoryFilter] = useState('All');
   const [editingMenuId, setEditingMenuId] = useState<string | null>(null);
   const [editPrice, setEditPrice] = useState<string>('');
+  const [editName, setEditName] = useState<string>('');
 
   // State Kasir
   const [cart, setCart] = useState<CartItem[]>([]);
   const [customerName, setCustomerName] = useState('');
   const [orderNote, setOrderNote] = useState('');
-  // Default payment state
   const [paymentMethod, setPaymentMethod] = useState<'Belum Bayar' | 'Cash' | 'QRIS Mandiri' | 'QRIS Gopay'>('Belum Bayar');
   const [editingOrderId, setEditingOrderId] = useState<string | null>(null);
 
@@ -86,7 +88,7 @@ export default function KasirWarung() {
     setToastMessage(message);
     setTimeout(() => {
       setToastMessage(null);
-    }, 1000); // Akan hilang otomatis dalam 1 detik
+    }, 1500); 
   };
 
   const fetchMenus = async () => {
@@ -99,7 +101,7 @@ export default function KasirWarung() {
     if (data) setOrders(data);
   };
 
-  // COPY WA
+  // --- FUNGSI COPY WA ---
   const copyToClipboard = (order: Order) => {
     const itemText = order.items.map(it => `- ${it.qty}x ${it.name} (Rp ${(it.qty * it.price).toLocaleString('id-ID')})`).join('\n');
     const text = `${itemText}\nTotal Rp ${order.total.toLocaleString('id-ID')}\n\n*Terima Kasih!* 🙏`;
@@ -108,14 +110,16 @@ export default function KasirWarung() {
   };
 
   // --- FUNGSI MASTER MENU ---
-  // Update Harga
-  const handleUpdatePrice = async (id: string) => {
-    const { error } = await supabase.from('menus').update({ price: parseInt(editPrice) }).eq('id', id);
+  // FITUR BARU: Update Nama & Harga
+  const handleUpdateMenu = async (id: string) => {
+    if (!editName || !editPrice) return showToast('Nama dan harga tidak boleh kosong! ⚠️');
+    const { error } = await supabase.from('menus').update({ name: editName, price: parseInt(editPrice) }).eq('id', id);
     if (!error) {
       setEditingMenuId(null);
       fetchMenus();
+      showToast('Menu berhasil diupdate! ✅');
     } else {
-      showToast('Gagal update harga');
+      showToast('Gagal update menu ❌');
     }
   };
 
@@ -126,19 +130,24 @@ export default function KasirWarung() {
     if (!error && data) {
       setMenuList([...menuList, data[0]]);
       setNewMenuName(''); setNewMenuPrice('');
+      showToast('Menu baru ditambahkan! 💾');
     }
   };
 
   const handleDeleteMenuFromMaster = async (id: string) => {
     if(confirm('Serius mau hapus menu ini?')) {
       const { error } = await supabase.from('menus').delete().eq('id', id);
-      if (!error) setMenuList(menuList.filter(m => m.id !== id));
+      if (!error) {
+        setMenuList(menuList.filter(m => m.id !== id));
+        showToast('Menu dihapus! 🗑️');
+      }
     }
   };
 
-  // --- FUNGSI KASIR ---
+  // --- KATEGORI GLOBAL ---
   const categories = ['All', ...Array.from(new Set(menuList.map(m => m.category)))];
-  
+
+  // --- FUNGSI KASIR ---
   const filteredMenu = menuList.filter(m => {
     const matchSearch = m.name.toLowerCase().includes(searchQuery.toLowerCase());
     const matchCategory = activeCategory === 'All' || m.category === activeCategory;
@@ -208,6 +217,7 @@ export default function KasirWarung() {
     if (!error) {
       clearKasir();
       setActiveTab('TRACKER');
+      showToast('Pesanan dikirim ke dapur! 🍳');
     } else showToast('Gagal memproses pesanan!');
   };
 
@@ -221,7 +231,10 @@ export default function KasirWarung() {
   };
 
   const deleteOrder = async (id: string) => {
-    if (confirm('Batalkan pesanan ini?')) await supabase.from('orders').delete().eq('id', id);
+    if (confirm('Batalkan pesanan ini?')) {
+      await supabase.from('orders').delete().eq('id', id);
+      showToast('Pesanan dibatalkan ❌');
+    }
   };
 
   const toggleItemDone = async (orderId: string, itemIndex: number) => {
@@ -447,7 +460,7 @@ export default function KasirWarung() {
                 <option value="Hari Ini">Hari Ini</option><option value="Minggu Ini">Minggu Ini</option><option value="Semua">Semua Waktu</option>
               </select>
             </div>
-
+            
             <div className="grid grid-cols-2 md:grid-cols-4 gap-4 md:gap-8 mb-10">
               <div className="bg-white p-6 rounded-3xl shadow-sm border border-gray-100 text-center flex flex-col items-center">
                 <p className="text-gray-400 font-bold text-[10px] uppercase mb-1 tracking-widest">Total Omzet</p>
@@ -475,10 +488,8 @@ export default function KasirWarung() {
                       <tr key={o.id} className="border-b hover:bg-orange-50/30 transition-colors">
                         <td className="p-4 text-xs font-bold text-gray-400">{new Date(o.created_at).toLocaleTimeString('id-ID', {hour:'2-digit', minute:'2-digit'})}</td>
                         
-                        {/* Hover Detail Pesanan */}
                         <td className="p-4 relative group cursor-pointer">
                           <span className="font-black text-sm border-b border-dashed border-gray-400 pb-0.5">{o.customer_name}</span>
-                          {/* Tooltip Hover Box */}
                           <div className="absolute left-4 top-full mt-1 w-56 bg-white border border-gray-200 shadow-xl rounded-2xl p-4 z-50 hidden group-hover:flex flex-col gap-1">
                              <p className="text-[9px] font-black text-gray-400 uppercase tracking-widest border-b pb-2 mb-1">Detail Pesanan</p>
                              {o.items.map((it, i) => (
@@ -505,8 +516,16 @@ export default function KasirWarung() {
           <div className="bg-white p-8 rounded-[40px] shadow-sm border w-full">
             <div className="flex flex-col md:flex-row justify-between items-center mb-8 gap-4">
               <h2 className="font-black text-3xl tracking-tighter">Manage <span className="text-orange-600">Master Menu</span></h2>
-              <div className="w-full md:max-w-md">
-                 <ModernInput placeholder="🔍 Cari nama menu di sini..." value={masterSearch} onChange={e => setMasterSearch(e.target.value)} className="bg-gray-50" />
+              
+              {/* FITUR BARU: Dropdown Filter Kategori ditaruh di sebelah Search */}
+              <div className="w-full md:max-w-xl flex gap-2">
+                 <select value={masterCategoryFilter} onChange={e => setMasterCategoryFilter(e.target.value)} className="bg-gray-50 border-2 border-gray-200 rounded-2xl p-3.5 font-bold outline-none focus:border-orange-600 w-1/3 text-sm">
+                   <option value="All">Semua Kategori</option>
+                   {categories.filter(c => c !== 'All').map(c => (
+                     <option key={c} value={c}>{c}</option>
+                   ))}
+                 </select>
+                 <ModernInput placeholder="🔍 Cari nama menu di sini..." value={masterSearch} onChange={e => setMasterSearch(e.target.value)} className="bg-gray-50 w-2/3" />
               </div>
             </div>
 
@@ -514,7 +533,6 @@ export default function KasirWarung() {
               <div>
                 <label className="text-[10px] font-black uppercase text-gray-500 mb-2 block ml-2">Kategori</label>
                 <select value={newMenuCategory} onChange={e => setNewMenuCategory(e.target.value)} className="w-full bg-white p-3.5 rounded-2xl border-2 border-gray-200 font-bold outline-none focus:border-orange-600">
-                   {/* Tambah Rokok & Sembako */}
                    <option>Nasi</option><option>Ala Carte</option><option>Snack</option><option>Minuman</option><option>Tambahan</option><option>Rokok</option><option>Sembako</option>
                 </select>
               </div>
@@ -534,24 +552,34 @@ export default function KasirWarung() {
               <table className="w-full text-left">
                 <thead className="bg-gray-50"><tr className="border-b-2 text-xs font-black text-gray-400 uppercase"><th className="p-5">Category</th><th className="p-5">Menu Name</th><th className="p-5">Price</th><th className="p-5 text-center">Action</th></tr></thead>
                 <tbody>
+                  {/* FITUR BARU: Filter Master Menu berdasarkan masterCategoryFilter */}
                   {menuList
-                    .filter(m => m.name.toLowerCase().includes(masterSearch.toLowerCase()))
+                    .filter(m => (masterCategoryFilter === 'All' || m.category === masterCategoryFilter) && m.name.toLowerCase().includes(masterSearch.toLowerCase()))
                     .sort((a,b) => a.category.localeCompare(b.category))
                     .map(m => (
                     <tr key={m.id} className="border-b hover:bg-gray-50 transition-colors">
                       <td className="p-5"><span className="text-[10px] font-black bg-gray-100 text-gray-600 px-3 py-1 rounded-full uppercase">{m.category}</span></td>
-                      <td className="p-5 font-black text-gray-900">{m.name}</td>
+                      
+                      {/* FITUR BARU: Nama Menu Bisa Diedit */}
+                      <td className="p-5 font-black text-gray-900">
+                        {editingMenuId === m.id ? (
+                           <input type="text" className="border-2 border-orange-300 rounded-lg p-1 w-full outline-none font-bold" value={editName} onChange={e => setEditName(e.target.value)} />
+                        ) : (
+                           m.name
+                        )}
+                      </td>
+
                       <td className="p-5 font-bold text-gray-600">
                         {editingMenuId === m.id ? (
                           <div className="flex gap-2">
                              <input type="number" className="border-2 border-orange-300 rounded-lg p-1 w-24 outline-none font-bold" value={editPrice} onChange={e => setEditPrice(e.target.value)} autoFocus />
-                             <button onClick={() => handleUpdatePrice(m.id)} className="bg-green-500 text-white px-3 py-1 rounded-lg text-xs font-black shadow-sm">OK</button>
+                             <button onClick={() => handleUpdateMenu(m.id)} className="bg-green-500 text-white px-3 py-1 rounded-lg text-xs font-black shadow-sm">OK</button>
                              <button onClick={() => setEditingMenuId(null)} className="bg-gray-400 text-white px-2 py-1 rounded-lg text-xs">✕</button>
                           </div>
                         ) : (
                           <div className="flex items-center gap-3">
                              <span className="text-base">Rp {m.price.toLocaleString('id-ID')}</span>
-                             <button onClick={() => { setEditingMenuId(m.id); setEditPrice(m.price.toString()); }} className="text-blue-500 text-[10px] font-black uppercase hover:underline">✏️ Edit</button>
+                             <button onClick={() => { setEditingMenuId(m.id); setEditPrice(m.price.toString()); setEditName(m.name); }} className="text-blue-500 text-[10px] font-black uppercase hover:underline">✏️ Edit</button>
                           </div>
                         )}
                       </td>
