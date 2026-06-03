@@ -1,6 +1,8 @@
 'use client';
 import { useState, useEffect } from 'react';
 import { supabase } from './supabase';
+import Image from 'next/image';
+import LogoKBS from './LogoKBS.svg';
 
 const THEME = {
   bg: 'bg-[#FAF9F6]',         
@@ -190,12 +192,9 @@ export default function KasirWarung() {
         {printData && (
           <>
             <div className="text-center mb-4 flex flex-col items-center">
-              <svg className="w-16 h-16 mb-2 text-black" viewBox="0 0 114 114" fill="none" xmlns="http://www.w3.org/2000/svg">
-                <rect width="114" height="114" rx="20" fill="white"/>
-                <path d="M57 95V87M57 19V27M28.5 57H20.5M95 57H87M77.1528 77.1528L71.4959 71.4959M36.8472 36.8472L42.5041 42.5041M77.1528 36.8472L71.4959 42.5041M36.8472 77.1528L42.5041 71.4959" stroke="currentColor" strokeWidth="8" strokeLinecap="round"/>
-                <circle cx="57" cy="57" r="18" fill="currentColor"/>
-              </svg>
-              <h2 className="font-bold text-base">KEDAI BU SABAR</h2>
+              {/* LOGO BARU KEDAI BU SABAR DI STRUK MENGGUNAKAN FILE SVG */}
+              <Image src={LogoKBS} alt="Logo Kedai Bu Sabar" width={70} height={70} className="mb-2 grayscale" priority />
+              <h2 className="font-bold text-base mt-1">KEDAI BU SABAR</h2>
               <p className="text-[10px]">Duwet Lor RT 02 RW 16 Baturetno</p>
               <p className="text-[10px]">083811014351</p>
               <p>-------------------------</p>
@@ -223,6 +222,7 @@ export default function KasirWarung() {
               <span>Rp {printData.total.toLocaleString('id-ID')}</span>
             </div>
             
+            {/* Munculin Cash/Kembali cuma kalau pembeli ngasih Cash */}
             {printData.payment_method === 'Cash' && (printData.cash_given || 0) > 0 && (
               <>
                 <div className="flex justify-between">
