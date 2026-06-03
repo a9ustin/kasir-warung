@@ -73,10 +73,16 @@ export default function KasirWarung() {
   const fetchMenus = async () => { const { data } = await supabase.from('menus').select('*'); if (data) setMenuList(data); };
   const fetchOrders = async () => { const { data } = await supabase.from('orders').select('*').order('created_at', { ascending: false }); if (data) setOrders(data); };
 
-  const copyToClipboard = (order: Order) => {
-    const itemText = order.items.map(it => `- ${it.qty}x ${it.name} (Rp ${(it.qty * it.price).toLocaleString('id-ID')})`).join('\n');
-    const text = `*PESANAN WARUNG*\nNama: ${order.customer_name}\n\n${itemText}\n\n*Total: Rp ${order.total.toLocaleString('id-ID')}*\nMetode: ${order.payment_method}\nCatatan: ${order.order_note || '-'}\n\n*Terima Kasih!* 🙏`;
-    navigator.clipboard.writeText(text); showToast('Pesanan disalin!');
+const copyToClipboard = (order: Order) => {
+    const itemText = order.items.map(it => {
+      const noteText = it.note ? ` (${it.note})` : '';
+      return `- ${it.qty}x ${it.name}${noteText} (Rp ${(it.qty * it.price).toLocaleString('id-ID')})`;
+    }).join('\n');
+    
+    const text = `${itemText}\n\n*Total: Rp ${order.total.toLocaleString('id-ID')}*\n\n*Terima Kasih!* 🙏`;
+    
+    navigator.clipboard.writeText(text); 
+    showToast('Pesanan disalin!');
   };
 
   // --- FUNGSI PRINT STRUK GAIB ---
