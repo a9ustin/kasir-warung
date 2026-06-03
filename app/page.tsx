@@ -1,5 +1,5 @@
 'use client';
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { supabase } from './supabase';
 import Image from 'next/image';
 import LogoKBS from './LogoKBS.svg';
@@ -17,9 +17,15 @@ const THEME = {
 };
 
 type MenuItem = { id: string; name: string; price: number; category: string };
+
+// FIX: qty pakai number saja, tidak boleh string/any
 type CartItem = MenuItem & { qty: number; note: string; isDone: boolean; isCustom?: boolean; orderType: 'Dine In' | 'Take Away' };
+
 type Order = { 
-  id: string; customer_name: string; order_note: string; items: CartItem[]; total: number; status: 'To Do' | 'In Progress' | 'Done'; payment_method: 'Belum Bayar' | 'Cash' | 'QRIS Mandiri' | 'QRIS Gopay'; created_at: string;
+  id: string; customer_name: string; order_note: string; items: CartItem[]; total: number; 
+  status: 'To Do' | 'In Progress' | 'Done'; 
+  payment_method: 'Belum Bayar' | 'Cash' | 'QRIS Mandiri' | 'QRIS Gopay'; 
+  created_at: string;
 };
 
 const ModernInput = (props: React.InputHTMLAttributes<HTMLInputElement>) => (
@@ -53,7 +59,10 @@ export default function KasirWarung() {
   // State Kalkulator Cash (Kasir & Dapur)
   const [cashGiven, setCashGiven] = useState<string>('');
   const [trackerCashGiven, setTrackerCashGiven] = useState<Record<string, string>>({});
+
+  // FIX: printData + useEffect menggantikan setTimeout yang rapuh
   const [printData, setPrintData] = useState<any>(null);
+  const printTriggered = useRef(false);
 
   const [newMenuName, setNewMenuName] = useState('');
   const [newMenuPrice, setNewMenuPrice] = useState('');
@@ -65,58 +74,97 @@ export default function KasirWarung() {
   // --- FETCH & REALTIME ---
   useEffect(() => {
     fetchMenus(); fetchOrders();
-    const channel = supabase.channel('realtime-orders').on('postgres_changes', { event: '*', schema: 'public', table: 'orders' }, () => fetchOrders()).subscribe();
+    const channel = supabase.channel('realtime-orders')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'orders' }, () => fetchOrders())
+      .subscribe();
     return () => { supabase.removeChannel(channel); };
   }, []);
 
-  const showToast = (message: string) => { setToastMessage(message); setTimeout(() => setToastMessage(null), 1500); };
-  const fetchMenus = async () => { const { data } = await supabase.from('menus').select('*'); if (data) setMenuList(data); };
-  const fetchOrders = async () => { const { data } = await supabase.from('orders').select('*').order('created_at', { ascending: false }); if (data) setOrders(data); };
+  // FIX: Print dipicu lewat useEffect, bukan setTimeout — lebih andal
+  useEffect(() => {
+    if (printData && !printTriggered.current) {
+      printTriggered.current = true;
+      // Beri sedikit waktu React untuk render struk dulu, lalu print
+      const timer = setTimeout(() => {
+        window.print();
+        // Reset setelah print supaya bisa print lagi nanti
+        setTimeout(() => {
+          setPrintData(null);
+          printTriggered.current = false;
+        }, 500);
+      }, 150);
+      return () => clearTimeout(timer);
+    }
+  }, [printData]);
 
-const copyToClipboard = (order: Order) => {
+  const showToast = (message: string) => { 
+    setToastMessage(message); 
+    setTimeout(() => setToastMessage(null), 1500); 
+  };
+
+  const fetchMenus = async () => { 
+    const { data } = await supabase.from('menus').select('*'); 
+    if (data) setMenuList(data); 
+  };
+
+  const fetchOrders = async () => { 
+    const { data } = await supabase.from('orders').select('*').order('created_at', { ascending: false }); 
+    if (data) setOrders(data); 
+  };
+
+  const copyToClipboard = (order: Order) => {
     const itemText = order.items.map(it => {
       const noteText = it.note ? ` (${it.note})` : '';
       return `- ${it.qty}x ${it.name}${noteText} (Rp ${(it.qty * it.price).toLocaleString('id-ID')})`;
     }).join('\n');
-    
     const text = `${itemText}\n\n*Total: Rp ${order.total.toLocaleString('id-ID')}*\n\n*Terima Kasih!* 🙏`;
-    
     navigator.clipboard.writeText(text); 
     showToast('Pesanan disalin!');
   };
 
-  // --- FUNGSI PRINT STRUK GAIB ---
+  // FIX: Tidak ada lagi setTimeout di sini — cukup set printData, useEffect yang handle
   const handlePrintCart = () => {
     if (!customerName || cart.length === 0) return showToast('Keranjang masih kosong!');
-    const orderToPrint = {
-      created_at: new Date().toISOString(), customer_name: customerName, payment_method: paymentMethod, order_note: orderNote,
-      items: cart.map(c => ({...c, qty: Number(c.qty) || 1})), total: totalCart, cash_given: parseInt(cashGiven) || 0
-    };
-    setPrintData(orderToPrint);
-    setTimeout(() => window.print(), 100);
+    setPrintData({
+      created_at: new Date().toISOString(), 
+      customer_name: customerName, 
+      payment_method: paymentMethod, 
+      order_note: orderNote,
+      items: cart.map(c => ({...c, qty: Number(c.qty) || 1})), 
+      total: totalCart, 
+      cash_given: parseInt(cashGiven) || 0
+    });
   };
 
   const handlePrintOrder = (order: Order, overrideCash?: string) => {
     setPrintData({ ...order, cash_given: parseInt(overrideCash || '0') });
-    setTimeout(() => window.print(), 100);
   };
 
   // --- FUNGSI MASTER MENU ---
   const handleUpdateMenu = async (id: string) => {
     if (!editName || !editPrice) return showToast('Nama/harga kosong! ⚠️');
     const { error } = await supabase.from('menus').update({ name: editName, price: parseInt(editPrice) }).eq('id', id);
-    if (!error) { setEditingMenuId(null); fetchMenus(); showToast('Menu diupdate! ✅'); } else showToast('Gagal update ❌');
+    if (!error) { setEditingMenuId(null); fetchMenus(); showToast('Menu diupdate! ✅'); } 
+    else showToast('Gagal update ❌');
   };
 
   const handleAddMenuToMaster = async () => {
     if (!newMenuName || !newMenuPrice) return showToast('Isi data lengkap!');
     const newMenu = { name: newMenuName, price: parseInt(newMenuPrice), category: newMenuCategory };
     const { data, error } = await supabase.from('menus').insert([newMenu]).select();
-    if (!error && data) { setMenuList([...menuList, data[0]]); setNewMenuName(''); setNewMenuPrice(''); showToast('Menu ditambah! 💾'); }
+    if (!error && data) { 
+      setMenuList([...menuList, data[0]]); 
+      setNewMenuName(''); 
+      setNewMenuPrice(''); 
+      showToast('Menu ditambah! 💾'); 
+    }
   };
 
   const handleDeleteMenuFromMaster = async (id: string) => {
-    if(confirm('Hapus menu ini?')) { const { error } = await supabase.from('menus').delete().eq('id', id); if (!error) { setMenuList(menuList.filter(m => m.id !== id)); showToast('Dihapus! 🗑️'); } }
+    if(confirm('Hapus menu ini?')) { 
+      const { error } = await supabase.from('menus').delete().eq('id', id); 
+      if (!error) { setMenuList(menuList.filter(m => m.id !== id)); showToast('Dihapus! 🗑️'); } 
+    }
   };
 
   const requestSort = (key: keyof MenuItem) => {
@@ -124,98 +172,143 @@ const copyToClipboard = (order: Order) => {
     if (sortConfig.key === key && sortConfig.direction === 'asc') direction = 'desc';
     setSortConfig({ key, direction });
   };
+
   const getSortIcon = (key: keyof MenuItem) => {
-    if (sortConfig.key !== key) return '↕️'; return sortConfig.direction === 'asc' ? '🔼' : '🔽';
+    if (sortConfig.key !== key) return '↕️'; 
+    return sortConfig.direction === 'asc' ? '🔼' : '🔽';
   };
 
   const categories = ['All', ...Array.from(new Set(menuList.map(m => m.category)))];
-  const filteredMenu = menuList.filter(m => (activeCategory === 'All' || m.category === activeCategory) && m.name.toLowerCase().includes(searchQuery.toLowerCase()));
+  const filteredMenu = menuList.filter(m => 
+    (activeCategory === 'All' || m.category === activeCategory) && 
+    m.name.toLowerCase().includes(searchQuery.toLowerCase())
+  );
 
-  // --- FUNGSI KART & KASIR ---
+  // --- FUNGSI CART & KASIR ---
   const addToCart = (item: MenuItem) => {
     const idx = cart.findIndex(c => c.id === item.id);
-    if (idx !== -1) { const newCart = [...cart]; newCart[idx].qty += 1; setCart(newCart); }
+    if (idx !== -1) { 
+      const newCart = [...cart]; 
+      newCart[idx].qty += 1; 
+      setCart(newCart); 
+    }
     else { setCart([...cart, { ...item, qty: 1, note: '', isDone: false, orderType: 'Take Away' }]); }
   };
 
   const addCustomItemToCart = () => {
     if (!customName || !customPrice) return showToast('Isi data dadakan!');
-    setCart([...cart, { id: `custom-${Date.now()}`, name: customName, price: parseInt(customPrice), category: 'Dadakan', qty: 1, note: '', isDone: false, isCustom: true, orderType: 'Take Away' }]);
-    setCustomName(''); setCustomPrice(''); showToast('Masuk keranjang!');
+    setCart([...cart, { 
+      // FIX: pakai crypto.randomUUID() biar ID tidak tabrakan
+      id: `custom-${crypto.randomUUID()}`, 
+      name: customName, 
+      price: parseInt(customPrice), 
+      category: 'Dadakan', 
+      qty: 1, 
+      note: '', 
+      isDone: false, 
+      isCustom: true, 
+      orderType: 'Take Away' 
+    }]);
+    setCustomName(''); 
+    setCustomPrice(''); 
+    showToast('Masuk keranjang!');
   };
 
+  // FIX: qty sekarang selalu number, tidak ada lagi `as any`
   const updateQtyDirect = (idx: number, val: string) => {
-    const newCart = [...cart]; const num = parseInt(val);
-    newCart[idx].qty = isNaN(num) ? ('' as any) : num;
+    const newCart = [...cart];
+    const num = parseInt(val);
+    // Kalau input kosong atau bukan angka, set ke 1 (nilai minimum)
+    newCart[idx].qty = isNaN(num) || num < 1 ? 1 : num;
     setCart(newCart);
   };
+
   const handleQtyBlur = (idx: number) => {
-    const newCart = [...cart]; if (!newCart[idx].qty || newCart[idx].qty <= 0) newCart[idx].qty = 1;
+    const newCart = [...cart]; 
+    if (!newCart[idx].qty || newCart[idx].qty <= 0) newCart[idx].qty = 1;
     setCart(newCart);
   };
+
   const updateQty = (idx: number, delta: number) => {
-    const newCart = [...cart]; newCart[idx].qty = (Number(newCart[idx].qty) || 0) + delta;
-    if (newCart[idx].qty <= 0) setCart(newCart.filter((_, i) => i !== idx)); else setCart(newCart);
+    const newCart = [...cart]; 
+    newCart[idx].qty = (Number(newCart[idx].qty) || 0) + delta;
+    if (newCart[idx].qty <= 0) setCart(newCart.filter((_, i) => i !== idx)); 
+    else setCart(newCart);
   };
 
   const totalCart = cart.reduce((s, i) => s + (i.price * (Number(i.qty) || 0)), 0);
 
-  const clearKasir = () => { setCart([]); setCustomerName(''); setOrderNote(''); setPaymentMethod('Belum Bayar'); setCashGiven(''); setEditingOrderId(null); setIsMobileCartOpen(false); };
+  const clearKasir = () => { 
+    setCart([]); setCustomerName(''); setOrderNote(''); 
+    setPaymentMethod('Belum Bayar'); setCashGiven(''); 
+    setEditingOrderId(null); setIsMobileCartOpen(false); 
+  };
 
   const submitOrder = async () => {
     if (!customerName || cart.length === 0) return showToast('Data belum lengkap!');
     const cleanCart = cart.map(c => ({...c, qty: Number(c.qty) || 1}));
-    const orderData = { customer_name: customerName, order_note: orderNote, items: cleanCart, total: totalCart, status: 'To Do', payment_method: paymentMethod };
-    const { error } = editingOrderId ? await supabase.from('orders').update(orderData).eq('id', editingOrderId) : await supabase.from('orders').insert([orderData]);
-    if (!error) { clearKasir(); setActiveTab('TRACKER'); showToast('Dikirim ke dapur! 🍳'); } else showToast('Gagal proses!');
+    const orderData = { 
+      customer_name: customerName, order_note: orderNote, 
+      items: cleanCart, total: totalCart, 
+      status: 'To Do', payment_method: paymentMethod 
+    };
+    const { error } = editingOrderId 
+      ? await supabase.from('orders').update(orderData).eq('id', editingOrderId) 
+      : await supabase.from('orders').insert([orderData]);
+    if (!error) { clearKasir(); setActiveTab('TRACKER'); showToast('Dikirim ke dapur! 🍳'); } 
+    else showToast('Gagal proses!');
   };
 
-  // OPTIMISTIC UPDATE: Ubah UI seketika tanpa nunggu server loading
   const updateStatus = async (id: string, s: string) => { 
-    setOrders(prev => prev.map(o => o.id === id ? { ...o, status: s as any } : o)); // Update UI Instant
-    await supabase.from('orders').update({ status: s }).eq('id', id); // Kirim ke database
+    setOrders(prev => prev.map(o => o.id === id ? { ...o, status: s as any } : o));
+    await supabase.from('orders').update({ status: s }).eq('id', id);
   };
   
-  const updatePayment = async (id: string, p: string) => { await supabase.from('orders').update({ payment_method: p }).eq('id', id); };
+  const updatePayment = async (id: string, p: string) => { 
+    // FIX: tambah optimistic update supaya konsisten
+    setOrders(prev => prev.map(o => o.id === id ? { ...o, payment_method: p as any } : o));
+    await supabase.from('orders').update({ payment_method: p }).eq('id', id); 
+  };
   
   const deleteOrder = async (id: string) => { 
     if (confirm('Batalkan pesanan ini?')) { 
-      setOrders(prev => prev.filter(o => o.id !== id)); // Update UI Instant
+      setOrders(prev => prev.filter(o => o.id !== id));
       await supabase.from('orders').delete().eq('id', id); 
       showToast('Dibatalkan ❌'); 
     } 
   };
   
-  // OPTIMISTIC UPDATE: Centang coretan seketika tanpa delay
-const toggleItemDone = async (orderId: string, itemIndex: number) => {
-  // 1. Cari order-nya langsung dari state sekarang
-  const order = orders.find(o => o.id === orderId);
-  if (!order) return;
+  // FIX: Race condition dihilangkan — data disiapkan SEBELUM setState, bukan di dalamnya
+  const toggleItemDone = async (orderId: string, itemIndex: number) => {
+    // 1. Cari order langsung dari state saat ini
+    const order = orders.find(o => o.id === orderId);
+    if (!order) return;
 
-  // 2. Buat salinan items yang sudah diupdate
-  const newItems = order.items.map((item, i) =>
-    i === itemIndex ? { ...item, isDone: !item.isDone } : item
-  );
+    // 2. Buat salinan items yang sudah diupdate — SEBELUM setState dipanggil
+    const newItems = order.items.map((item, i) =>
+      i === itemIndex ? { ...item, isDone: !item.isDone } : item
+    );
 
-  // 3. Update UI dulu (optimistic)
-  setOrders(prev => prev.map(o =>
-    o.id === orderId ? { ...o, items: newItems } : o
-  ));
-
-  // 4. Kirim ke Supabase — sekarang newItems PASTI sudah berisi data yang benar
-  const { error } = await supabase
-    .from('orders')
-    .update({ items: newItems })
-    .eq('id', orderId);
-
-  // 5. Kalau gagal, rollback UI-nya
-  if (error) {
+    // 3. Update UI dulu (optimistic) — newItems sudah pasti terisi
     setOrders(prev => prev.map(o =>
-      o.id === orderId ? { ...o, items: order.items } : o // balik ke items lama
+      o.id === orderId ? { ...o, items: newItems } : o
     ));
-    showToast('Gagal update, coba lagi ❌');
-  }
-};
+
+    // 4. Kirim ke Supabase
+    const { error } = await supabase
+      .from('orders')
+      .update({ items: newItems })
+      .eq('id', orderId);
+
+    // 5. Kalau gagal, rollback UI ke kondisi sebelumnya
+    if (error) {
+      setOrders(prev => prev.map(o =>
+        o.id === orderId ? { ...o, items: order.items } : o
+      ));
+      showToast('Gagal update, coba lagi ❌');
+    }
+  };
+
   const recapOrders = orders.filter(o => {
     const d = new Date(o.created_at); const now = new Date();
     if (recapFilter === 'Hari Ini') return d.toDateString() === now.toDateString();
@@ -352,10 +445,15 @@ const toggleItemDone = async (orderId: string, itemIndex: number) => {
                         
                         <div className="flex items-center gap-1 bg-white border border-gray-200 rounded-xl px-1 py-1 shadow-sm shrink-0">
                           <button onClick={() => updateQty(idx, -1)} className="text-gray-500 hover:text-orange-600 font-extrabold w-6 h-6 flex items-center justify-center">-</button>
-                          <input type="number" value={item.qty} onChange={(e) => updateQtyDirect(idx, e.target.value)} onBlur={() => handleQtyBlur(idx)} className="w-8 text-center text-sm font-bold bg-transparent outline-none focus:bg-orange-50 rounded" />
+                          <input 
+                            type="number" 
+                            value={item.qty} 
+                            onChange={(e) => updateQtyDirect(idx, e.target.value)} 
+                            onBlur={() => handleQtyBlur(idx)} 
+                            className="w-8 text-center text-sm font-bold bg-transparent outline-none focus:bg-orange-50 rounded" 
+                          />
                           <button onClick={() => updateQty(idx, 1)} className="text-gray-500 hover:text-orange-600 font-extrabold w-6 h-6 flex items-center justify-center">+</button>
                         </div>
-
                       </div>
                       <div className="flex gap-2 mt-3 items-center">
                         <select value={item.orderType} onChange={e => { const n = [...cart]; n[idx].orderType = e.target.value as any; setCart(n); }} className={`text-[10px] font-bold p-2 rounded-xl outline-none cursor-pointer border ${item.orderType === 'Take Away' ? 'bg-orange-100 text-orange-700' : 'bg-green-100 text-green-700'}`}>
@@ -406,7 +504,8 @@ const toggleItemDone = async (orderId: string, itemIndex: number) => {
 
                 <div className="border-t pt-5">
                   <div className="flex justify-between items-end text-3xl font-black mb-6 tracking-tighter">
-                    <span className="text-base text-gray-500 font-bold">Total Pay:</span><span className="text-orange-600">Rp {totalCart.toLocaleString('id-ID')}</span>
+                    <span className="text-base text-gray-500 font-bold">Total Pay:</span>
+                    <span className="text-orange-600">Rp {totalCart.toLocaleString('id-ID')}</span>
                   </div>
                   <div className="flex gap-2">
                      {editingOrderId && <button onClick={clearKasir} className="bg-gray-100 text-gray-500 font-bold px-4 rounded-2xl hover:bg-gray-200">Cancel</button>}
@@ -432,7 +531,7 @@ const toggleItemDone = async (orderId: string, itemIndex: number) => {
             </div>
           )}
 
-          {/* --- HALAMAN TRACKER (DAPUR) - FIX JADI 2 KOLOM --- */}
+          {/* --- HALAMAN TRACKER (DAPUR) --- */}
           {activeTab === 'TRACKER' && (
             <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
               {(['To Do', 'Done'] as const).map(status => (
@@ -441,7 +540,7 @@ const toggleItemDone = async (orderId: string, itemIndex: number) => {
                     {status === 'To Do' ? '🍳 Dimasak' : '✅ Selesai'}
                     <span className="bg-orange-100 text-orange-600 px-3 rounded-full text-sm">
                       {orders.filter(o => { 
-                         if (status === 'To Do') return o.status === 'To Do' || o.status === 'In Progress'; // Gabung yg lama
+                         if (status === 'To Do') return o.status === 'To Do' || o.status === 'In Progress';
                          return o.status === 'Done' && new Date(o.created_at).toDateString() === new Date().toDateString(); 
                       }).length}
                     </span>
@@ -461,10 +560,15 @@ const toggleItemDone = async (orderId: string, itemIndex: number) => {
                         <button onClick={() => copyToClipboard(o)} className="bg-green-100 text-green-700 px-2 py-1 rounded-lg font-black text-[10px] hover:bg-green-200 transition-colors shrink-0 border border-green-200">📋 COPY WA</button>
                       </div>
                       
-                      <div className="flex justify-between items-start mb-2 pr-20"><p className="font-black text-xl text-gray-900 leading-tight">{o.customer_name}</p></div>
+                      <div className="flex justify-between items-start mb-2 pr-20">
+                        <p className="font-black text-xl text-gray-900 leading-tight">{o.customer_name}</p>
+                      </div>
                       
                       <select value={o.payment_method} onChange={e => updatePayment(o.id, e.target.value)} className={`text-[10px] font-bold p-1 rounded-lg border mt-2 mb-4 outline-none ${o.payment_method === 'Belum Bayar' ? 'bg-red-50 text-red-600 border-red-200' : 'bg-green-50 text-green-700 border-green-200'}`}>
-                         <option value="Belum Bayar">Belum Lunas</option><option value="Cash">Lunas (Cash)</option><option value="QRIS Mandiri">Lunas (QRIS Mandiri)</option><option value="QRIS Gopay">Lunas (QRIS Gopay)</option>
+                         <option value="Belum Bayar">Belum Lunas</option>
+                         <option value="Cash">Lunas (Cash)</option>
+                         <option value="QRIS Mandiri">Lunas (QRIS Mandiri)</option>
+                         <option value="QRIS Gopay">Lunas (QRIS Gopay)</option>
                       </select>
 
                       {o.payment_method === 'Cash' && (
@@ -492,17 +596,27 @@ const toggleItemDone = async (orderId: string, itemIndex: number) => {
                           <div key={i} className="flex items-start gap-2 cursor-pointer" onClick={() => toggleItemDone(o.id, i)}>
                              <input type="checkbox" checked={it.isDone} readOnly className="mt-1 w-4 h-4 rounded text-orange-600 focus:ring-orange-500 cursor-pointer pointer-events-none" />
                              <div className="flex-1">
-                               <div className="flex justify-between"><p className={`text-sm font-bold transition-all ${it.isDone ? 'line-through text-gray-400' : 'text-gray-900'}`}>{it.qty}x {it.name}</p><span className="text-gray-400 font-medium text-[11px] mt-0.5">Rp {(it.qty * it.price).toLocaleString('id-ID')}</span></div>
-                               <div className="flex gap-2 items-center mt-1"><span className={`text-[9px] font-bold px-1 rounded ${it.orderType === 'Take Away' ? 'bg-orange-100 text-orange-600' : 'bg-green-100 text-green-600'}`}>{it.orderType}</span>{it.note && <span className="text-[10px] text-red-500 font-medium italic">-{it.note}</span>}</div>
+                               <div className="flex justify-between">
+                                 <p className={`text-sm font-bold transition-all ${it.isDone ? 'line-through text-gray-400' : 'text-gray-900'}`}>{it.qty}x {it.name}</p>
+                                 <span className="text-gray-400 font-medium text-[11px] mt-0.5">Rp {(it.qty * it.price).toLocaleString('id-ID')}</span>
+                               </div>
+                               <div className="flex gap-2 items-center mt-1">
+                                 <span className={`text-[9px] font-bold px-1 rounded ${it.orderType === 'Take Away' ? 'bg-orange-100 text-orange-600' : 'bg-green-100 text-green-600'}`}>{it.orderType}</span>
+                                 {it.note && <span className="text-[10px] text-red-500 font-medium italic">-{it.note}</span>}
+                               </div>
                              </div>
                           </div>
                         ))}
                       </div>
-                      <div className="flex justify-between items-center mt-3 mb-4 px-1 border-t border-gray-200 pt-3"><span className="text-xs font-black text-gray-400 uppercase">Total Pay:</span><span className="text-lg font-black text-orange-600">Rp {o.total.toLocaleString('id-ID')}</span></div>
+                      <div className="flex justify-between items-center mt-3 mb-4 px-1 border-t border-gray-200 pt-3">
+                        <span className="text-xs font-black text-gray-400 uppercase">Total Pay:</span>
+                        <span className="text-lg font-black text-orange-600">Rp {o.total.toLocaleString('id-ID')}</span>
+                      </div>
                       
                       <div className="flex gap-2">
-                        {/* Tombol langsung Siap Saji karena tahapannya cuma 2 */}
-                        {(o.status === 'To Do' || o.status === 'In Progress') && <button onClick={() => updateStatus(o.id, 'Done')} className="flex-1 bg-green-600 text-white py-3 rounded-xl font-black text-xs">Siap Saji ✅</button>}
+                        {(o.status === 'To Do' || o.status === 'In Progress') && (
+                          <button onClick={() => updateStatus(o.id, 'Done')} className="flex-1 bg-green-600 text-white py-3 rounded-xl font-black text-xs">Siap Saji ✅</button>
+                        )}
                       </div>
                     </div>
                   ))}
@@ -516,7 +630,11 @@ const toggleItemDone = async (orderId: string, itemIndex: number) => {
             <div className="max-w-5xl mx-auto">
               <div className="flex flex-col md:flex-row justify-between items-center mb-10 gap-4">
                 <h2 className="font-black text-4xl tracking-tighter">Laporan <span className="text-orange-600">Duit</span></h2>
-                <select value={recapFilter} onChange={e => setRecapFilter(e.target.value as any)} className="bg-white border-4 border-gray-100 p-3 rounded-2xl font-black shadow-sm outline-none w-full md:w-auto"><option value="Hari Ini">Hari Ini</option><option value="Minggu Ini">Minggu Ini</option><option value="Semua">Semua Waktu</option></select>
+                <select value={recapFilter} onChange={e => setRecapFilter(e.target.value as any)} className="bg-white border-4 border-gray-100 p-3 rounded-2xl font-black shadow-sm outline-none w-full md:w-auto">
+                  <option value="Hari Ini">Hari Ini</option>
+                  <option value="Minggu Ini">Minggu Ini</option>
+                  <option value="Semua">Semua Waktu</option>
+                </select>
               </div>
               <div className="grid grid-cols-2 md:grid-cols-4 gap-4 md:gap-8 mb-10">
                 <div className="bg-white p-6 rounded-3xl shadow-sm border border-gray-100 text-center flex flex-col items-center"><p className="text-gray-400 font-bold text-[10px] uppercase mb-1 tracking-widest">Total Omzet</p><p className="text-2xl font-black text-green-600">Rp {revenue.toLocaleString('id-ID')}</p></div>
@@ -525,10 +643,17 @@ const toggleItemDone = async (orderId: string, itemIndex: number) => {
                 <div className="bg-white p-6 rounded-3xl shadow-sm border border-gray-100 text-center flex flex-col items-center"><p className="text-gray-400 font-bold text-[10px] uppercase mb-1 tracking-widest">Gopay</p><p className="text-2xl font-black text-blue-400">Rp {qrisGopay.toLocaleString('id-ID')}</p></div>
               </div>
               
-              {/* FIX HP: Dikasih overflow-x-auto biar tabel bisa digeser ke samping kalau layarnya kecil */}
               <div className="overflow-x-auto bg-white rounded-3xl border shadow-sm">
                  <table className="w-full text-left whitespace-nowrap">
-                    <thead className="bg-gray-50"><tr className="text-[10px] font-black uppercase text-gray-500 border-b"><th className="p-4 rounded-tl-3xl">Waktu</th><th className="p-4">Customer</th><th className="p-4">Metode</th><th className="p-4 text-right">Total</th><th className="p-4 text-center rounded-tr-3xl">Aksi</th></tr></thead>
+                    <thead className="bg-gray-50">
+                      <tr className="text-[10px] font-black uppercase text-gray-500 border-b">
+                        <th className="p-4 rounded-tl-3xl">Waktu</th>
+                        <th className="p-4">Customer</th>
+                        <th className="p-4">Metode</th>
+                        <th className="p-4 text-right">Total</th>
+                        <th className="p-4 text-center rounded-tr-3xl">Aksi</th>
+                      </tr>
+                    </thead>
                     <tbody>
                       {recapOrders.map(o => (
                         <tr key={o.id} className="border-b hover:bg-orange-50/30 transition-colors">
@@ -558,11 +683,10 @@ const toggleItemDone = async (orderId: string, itemIndex: number) => {
             <div className="bg-white p-4 md:p-8 rounded-3xl md:rounded-[40px] shadow-sm border w-full">
               <div className="flex flex-col md:flex-row justify-between items-center mb-6 md:mb-8 gap-4">
                 <h2 className="font-black text-3xl tracking-tighter">Manage <span className="text-orange-600">Master Menu</span></h2>
-                
-                {/* FIX HP: Dikasih flex-col untuk HP, jadi di HP dia atas-bawah, di Laptop nyamping */}
                 <div className="w-full md:max-w-xl flex flex-col md:flex-row gap-3">
                    <select value={masterCategoryFilter} onChange={e => setMasterCategoryFilter(e.target.value)} className="bg-gray-50 border-2 border-gray-200 rounded-2xl p-3.5 font-bold outline-none focus:border-orange-600 w-full md:w-1/3 text-sm">
-                     <option value="All">Semua Kategori</option>{categories.filter(c => c !== 'All').map(c => ( <option key={c} value={c}>{c}</option> ))}
+                     <option value="All">Semua Kategori</option>
+                     {categories.filter(c => c !== 'All').map(c => ( <option key={c} value={c}>{c}</option> ))}
                    </select>
                    <ModernInput placeholder="🔍 Cari nama menu di sini..." value={masterSearch} onChange={e => setMasterSearch(e.target.value)} className="bg-gray-50 w-full md:w-2/3" />
                 </div>
@@ -625,6 +749,7 @@ const toggleItemDone = async (orderId: string, itemIndex: number) => {
             </div>
           )}
         </div>
+
         {toastMessage && (
           <div className="fixed bottom-10 left-1/2 transform -translate-x-1/2 bg-gray-900 text-white px-6 py-3 rounded-full shadow-2xl z-[100] flex items-center gap-2 animate-bounce">
             <span className="font-bold text-sm">{toastMessage}</span>
