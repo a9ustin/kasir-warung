@@ -187,29 +187,35 @@ const copyToClipboard = (order: Order) => {
   };
   
   // OPTIMISTIC UPDATE: Centang coretan seketika tanpa delay
-  const toggleItemDone = async (orderId: string, itemIndex: number) => {
-    let newItemsToSave: any = [];
-    
-    setOrders(prevOrders => prevOrders.map(o => {
-      if (o.id === orderId) {
-        const newItems = [...o.items];
-        
-        newItems[itemIndex] = { 
-          ...newItems[itemIndex], 
-          isDone: !newItems[itemIndex].isDone 
-        };
-        
-        newItemsToSave = newItems;
-        return { ...o, items: newItems };
-      }
-      return o;
-    }));
-    
-    if(newItemsToSave.length > 0) {
-      await supabase.from('orders').update({ items: newItemsToSave }).eq('id', orderId);
-    }
-  };
+const toggleItemDone = async (orderId: string, itemIndex: number) => {
+  // 1. Cari order-nya langsung dari state sekarang
+  const order = orders.find(o => o.id === orderId);
+  if (!order) return;
 
+  // 2. Buat salinan items yang sudah diupdate
+  const newItems = order.items.map((item, i) =>
+    i === itemIndex ? { ...item, isDone: !item.isDone } : item
+  );
+
+  // 3. Update UI dulu (optimistic)
+  setOrders(prev => prev.map(o =>
+    o.id === orderId ? { ...o, items: newItems } : o
+  ));
+
+  // 4. Kirim ke Supabase — sekarang newItems PASTI sudah berisi data yang benar
+  const { error } = await supabase
+    .from('orders')
+    .update({ items: newItems })
+    .eq('id', orderId);
+
+  // 5. Kalau gagal, rollback UI-nya
+  if (error) {
+    setOrders(prev => prev.map(o =>
+      o.id === orderId ? { ...o, items: order.items } : o // balik ke items lama
+    ));
+    showToast('Gagal update, coba lagi ❌');
+  }
+};
   const recapOrders = orders.filter(o => {
     const d = new Date(o.created_at); const now = new Date();
     if (recapFilter === 'Hari Ini') return d.toDateString() === now.toDateString();
