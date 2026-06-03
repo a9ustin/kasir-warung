@@ -164,13 +164,40 @@ export default function KasirWarung() {
     if (!error) { clearKasir(); setActiveTab('TRACKER'); showToast('Dikirim ke dapur! 🍳'); } else showToast('Gagal proses!');
   };
 
-  const updateStatus = async (id: string, s: string) => { await supabase.from('orders').update({ status: s }).eq('id', id); };
+  // OPTIMISTIC UPDATE: Ubah UI seketika tanpa nunggu server loading
+  const updateStatus = async (id: string, s: string) => { 
+    setOrders(prev => prev.map(o => o.id === id ? { ...o, status: s as any } : o)); // Update UI Instant
+    await supabase.from('orders').update({ status: s }).eq('id', id); // Kirim ke database
+  };
+  
   const updatePayment = async (id: string, p: string) => { await supabase.from('orders').update({ payment_method: p }).eq('id', id); };
-  const deleteOrder = async (id: string) => { if (confirm('Batalkan pesanan ini?')) { await supabase.from('orders').delete().eq('id', id); showToast('Dibatalkan ❌'); } };
+  
+  const deleteOrder = async (id: string) => { 
+    if (confirm('Batalkan pesanan ini?')) { 
+      setOrders(prev => prev.filter(o => o.id !== id)); // Update UI Instant
+      await supabase.from('orders').delete().eq('id', id); 
+      showToast('Dibatalkan ❌'); 
+    } 
+  };
+  
+  // OPTIMISTIC UPDATE: Centang coretan seketika tanpa delay
   const toggleItemDone = async (orderId: string, itemIndex: number) => {
-    const orderToUpdate = orders.find(o => o.id === orderId); if (!orderToUpdate) return;
-    const newItems = [...orderToUpdate.items]; newItems[itemIndex].isDone = !newItems[itemIndex].isDone;
-    await supabase.from('orders').update({ items: newItems }).eq('id', orderId);
+    // 1. Update layar saat itu juga (No Delay)
+    let newItemsToSave: any = [];
+    setOrders(prevOrders => prevOrders.map(o => {
+      if (o.id === orderId) {
+        const newItems = [...o.items];
+        newItems[itemIndex].isDone = !newItems[itemIndex].isDone;
+        newItemsToSave = newItems;
+        return { ...o, items: newItems };
+      }
+      return o;
+    }));
+    
+    // 2. Kirim update ke database di background
+    if(newItemsToSave.length > 0) {
+      await supabase.from('orders').update({ items: newItemsToSave }).eq('id', orderId);
+    }
   };
 
   const recapOrders = orders.filter(o => {
@@ -192,7 +219,6 @@ export default function KasirWarung() {
         {printData && (
           <>
             <div className="text-center mb-4 flex flex-col items-center">
-              {/* LOGO BARU KEDAI BU SABAR DI STRUK MENGGUNAKAN FILE SVG */}
               <Image src={LogoKBS} alt="Logo Kedai Bu Sabar" width={70} height={70} className="mb-2 grayscale" priority />
               <h2 className="font-bold text-base mt-1">KEDAI BU SABAR</h2>
               <p className="text-[10px]">Duwet Lor RT 02 RW 16 Baturetno</p>
@@ -222,7 +248,6 @@ export default function KasirWarung() {
               <span>Rp {printData.total.toLocaleString('id-ID')}</span>
             </div>
             
-            {/* Munculin Cash/Kembali cuma kalau pembeli ngasih Cash */}
             {printData.payment_method === 'Cash' && (printData.cash_given || 0) > 0 && (
               <>
                 <div className="flex justify-between">
@@ -391,21 +416,26 @@ export default function KasirWarung() {
             </div>
           )}
 
-          {/* --- HALAMAN TRACKER (DAPUR) --- */}
+          {/* --- HALAMAN TRACKER (DAPUR) - FIX JADI 2 KOLOM --- */}
           {activeTab === 'TRACKER' && (
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-8">
-              {(['To Do', 'In Progress', 'Done'] as const).map(status => (
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
+              {(['To Do', 'Done'] as const).map(status => (
                 <div key={status} className="bg-white p-6 rounded-3xl border min-h-[60vh] shadow-sm">
                   <h3 className="font-black text-xl mb-6 border-b pb-4 flex justify-between items-center">
-                    {status === 'To Do' ? '📝 Antrean' : status === 'In Progress' ? '🍳 Dimasak' : '✅ Selesai'}
+                    {status === 'To Do' ? '🍳 Dimasak' : '✅ Selesai'}
                     <span className="bg-orange-100 text-orange-600 px-3 rounded-full text-sm">
-                      {orders.filter(o => { if (status !== 'Done') return o.status === status; return o.status === 'Done' && new Date(o.created_at).toDateString() === new Date().toDateString(); }).length}
+                      {orders.filter(o => { 
+                         if (status === 'To Do') return o.status === 'To Do' || o.status === 'In Progress'; // Gabung yg lama
+                         return o.status === 'Done' && new Date(o.created_at).toDateString() === new Date().toDateString(); 
+                      }).length}
                     </span>
                   </h3>
-                  {orders.filter(o => { if (status !== 'Done') return o.status === status; return o.status === 'Done' && new Date(o.created_at).toDateString() === new Date().toDateString(); }).map(o => (
+                  
+                  {orders.filter(o => { 
+                     if (status === 'To Do') return o.status === 'To Do' || o.status === 'In Progress';
+                     return o.status === 'Done' && new Date(o.created_at).toDateString() === new Date().toDateString(); 
+                  }).map(o => (
                     <div key={o.id} className="bg-gray-50 p-5 rounded-3xl border border-gray-100 mb-5 relative group shadow-sm">
-                      
-                      {/* FIX IPAD: Hapus efek hover, tombol selalu muncul di pojok kanan atas */}
                       <div className="absolute top-4 right-4 flex flex-col gap-2 items-end z-10">
                         <div className="flex gap-2">
                           <button onClick={() => handlePrintOrder(o, trackerCashGiven[o.id])} className="text-[12px] bg-blue-100 text-blue-700 px-2.5 py-1 rounded-lg font-black shadow-sm border border-blue-200">🖨️ Print</button>
@@ -443,19 +473,20 @@ export default function KasirWarung() {
                       
                       <div className="space-y-2 mb-5 bg-white p-3 rounded-xl border border-gray-100">
                         {o.items.map((it, i) => (
-                          <div key={i} className="flex items-start gap-2">
-                             <input type="checkbox" checked={it.isDone} onChange={() => toggleItemDone(o.id, i)} className="mt-1 w-4 h-4 rounded text-orange-600 focus:ring-orange-500" />
+                          <div key={i} className="flex items-start gap-2 cursor-pointer" onClick={() => toggleItemDone(o.id, i)}>
+                             <input type="checkbox" checked={it.isDone} readOnly className="mt-1 w-4 h-4 rounded text-orange-600 focus:ring-orange-500 cursor-pointer pointer-events-none" />
                              <div className="flex-1">
-                               <div className="flex justify-between"><p className={`text-sm font-bold ${it.isDone ? 'line-through text-gray-400' : 'text-gray-900'}`}>{it.qty}x {it.name}</p><span className="text-gray-400 font-medium text-[11px] mt-0.5">Rp {(it.qty * it.price).toLocaleString('id-ID')}</span></div>
+                               <div className="flex justify-between"><p className={`text-sm font-bold transition-all ${it.isDone ? 'line-through text-gray-400' : 'text-gray-900'}`}>{it.qty}x {it.name}</p><span className="text-gray-400 font-medium text-[11px] mt-0.5">Rp {(it.qty * it.price).toLocaleString('id-ID')}</span></div>
                                <div className="flex gap-2 items-center mt-1"><span className={`text-[9px] font-bold px-1 rounded ${it.orderType === 'Take Away' ? 'bg-orange-100 text-orange-600' : 'bg-green-100 text-green-600'}`}>{it.orderType}</span>{it.note && <span className="text-[10px] text-red-500 font-medium italic">-{it.note}</span>}</div>
                              </div>
                           </div>
                         ))}
                       </div>
                       <div className="flex justify-between items-center mt-3 mb-4 px-1 border-t border-gray-200 pt-3"><span className="text-xs font-black text-gray-400 uppercase">Total Pay:</span><span className="text-lg font-black text-orange-600">Rp {o.total.toLocaleString('id-ID')}</span></div>
+                      
                       <div className="flex gap-2">
-                        {status === 'To Do' && <button onClick={() => updateStatus(o.id, 'In Progress')} className="flex-1 bg-orange-600 text-white py-3 rounded-xl font-black text-xs">Gas Masak 🔥</button>}
-                        {status === 'In Progress' && <button onClick={() => updateStatus(o.id, 'Done')} className="flex-1 bg-green-600 text-white py-3 rounded-xl font-black text-xs">Siap Saji ✅</button>}
+                        {/* Tombol langsung Siap Saji karena tahapannya cuma 2 */}
+                        {(o.status === 'To Do' || o.status === 'In Progress') && <button onClick={() => updateStatus(o.id, 'Done')} className="flex-1 bg-green-600 text-white py-3 rounded-xl font-black text-xs">Siap Saji ✅</button>}
                       </div>
                     </div>
                   ))}
@@ -469,7 +500,7 @@ export default function KasirWarung() {
             <div className="max-w-5xl mx-auto">
               <div className="flex flex-col md:flex-row justify-between items-center mb-10 gap-4">
                 <h2 className="font-black text-4xl tracking-tighter">Laporan <span className="text-orange-600">Duit</span></h2>
-                <select value={recapFilter} onChange={e => setRecapFilter(e.target.value as any)} className="bg-white border-4 border-gray-100 p-3 rounded-2xl font-black shadow-sm outline-none"><option value="Hari Ini">Hari Ini</option><option value="Minggu Ini">Minggu Ini</option><option value="Semua">Semua Waktu</option></select>
+                <select value={recapFilter} onChange={e => setRecapFilter(e.target.value as any)} className="bg-white border-4 border-gray-100 p-3 rounded-2xl font-black shadow-sm outline-none w-full md:w-auto"><option value="Hari Ini">Hari Ini</option><option value="Minggu Ini">Minggu Ini</option><option value="Semua">Semua Waktu</option></select>
               </div>
               <div className="grid grid-cols-2 md:grid-cols-4 gap-4 md:gap-8 mb-10">
                 <div className="bg-white p-6 rounded-3xl shadow-sm border border-gray-100 text-center flex flex-col items-center"><p className="text-gray-400 font-bold text-[10px] uppercase mb-1 tracking-widest">Total Omzet</p><p className="text-2xl font-black text-green-600">Rp {revenue.toLocaleString('id-ID')}</p></div>
@@ -477,8 +508,10 @@ export default function KasirWarung() {
                 <div className="bg-white p-6 rounded-3xl shadow-sm border border-gray-100 text-center flex flex-col items-center"><p className="text-gray-400 font-bold text-[10px] uppercase mb-1 tracking-widest">Mandiri</p><p className="text-2xl font-black text-blue-600">Rp {qrisMandiri.toLocaleString('id-ID')}</p></div>
                 <div className="bg-white p-6 rounded-3xl shadow-sm border border-gray-100 text-center flex flex-col items-center"><p className="text-gray-400 font-bold text-[10px] uppercase mb-1 tracking-widest">Gopay</p><p className="text-2xl font-black text-blue-400">Rp {qrisGopay.toLocaleString('id-ID')}</p></div>
               </div>
-              <div className="bg-white rounded-3xl border shadow-sm">
-                 <table className="w-full text-left">
+              
+              {/* FIX HP: Dikasih overflow-x-auto biar tabel bisa digeser ke samping kalau layarnya kecil */}
+              <div className="overflow-x-auto bg-white rounded-3xl border shadow-sm">
+                 <table className="w-full text-left whitespace-nowrap">
                     <thead className="bg-gray-50"><tr className="text-[10px] font-black uppercase text-gray-500 border-b"><th className="p-4 rounded-tl-3xl">Waktu</th><th className="p-4">Customer</th><th className="p-4">Metode</th><th className="p-4 text-right">Total</th><th className="p-4 text-center rounded-tr-3xl">Aksi</th></tr></thead>
                     <tbody>
                       {recapOrders.map(o => (
@@ -488,10 +521,10 @@ export default function KasirWarung() {
                             <span className="font-black text-sm border-b border-dashed border-gray-400 pb-0.5">{o.customer_name}</span>
                             <div className="absolute left-4 top-full mt-1 w-56 bg-white border border-gray-200 shadow-xl rounded-2xl p-4 z-50 hidden group-hover:flex flex-col gap-1">
                                <p className="text-[9px] font-black text-gray-400 uppercase tracking-widest border-b pb-2 mb-1">Detail Pesanan</p>
-                               {o.items.map((it, i) => (<div key={i} className="flex justify-between text-xs font-bold text-gray-700"><span>{it.qty}x {it.name}</span><span className="text-gray-400">Rp {(it.qty * it.price).toLocaleString('id-ID')}</span></div>))}
+                               {o.items.map((it, i) => (<div key={i} className="flex justify-between text-xs font-bold text-gray-700 whitespace-normal"><span>{it.qty}x {it.name}</span><span className="text-gray-400 shrink-0 ml-2">Rp {(it.qty * it.price).toLocaleString('id-ID')}</span></div>))}
                             </div>
                           </td>
-                          <td className="p-4"><span className={`text-[10px] font-bold px-2 py-1 rounded-lg ${o.payment_method.includes('QRIS') ? 'bg-blue-100 text-blue-700' : 'bg-orange-100 text-orange-700'}`}>{o.payment_method}</span></td>
+                          <td className="p-4"><span className={`text-[10px] font-bold px-2 py-1 rounded-lg whitespace-nowrap ${o.payment_method.includes('QRIS') ? 'bg-blue-100 text-blue-700' : 'bg-orange-100 text-orange-700'}`}>{o.payment_method}</span></td>
                           <td className="p-4 text-right font-bold text-sm">Rp {o.total.toLocaleString('id-ID')}</td>
                           <td className="p-4 text-center">
                             <button onClick={() => handlePrintOrder(o)} className="text-xl hover:scale-125 transition-transform" title="Print Ulang Nota">🖨️</button>
@@ -506,14 +539,16 @@ export default function KasirWarung() {
 
           {/* --- HALAMAN MASTER --- */}
           {activeTab === 'MASTER' && (
-            <div className="bg-white p-8 rounded-[40px] shadow-sm border w-full">
-              <div className="flex flex-col md:flex-row justify-between items-center mb-8 gap-4">
+            <div className="bg-white p-4 md:p-8 rounded-3xl md:rounded-[40px] shadow-sm border w-full">
+              <div className="flex flex-col md:flex-row justify-between items-center mb-6 md:mb-8 gap-4">
                 <h2 className="font-black text-3xl tracking-tighter">Manage <span className="text-orange-600">Master Menu</span></h2>
-                <div className="w-full md:max-w-xl flex gap-2">
-                   <select value={masterCategoryFilter} onChange={e => setMasterCategoryFilter(e.target.value)} className="bg-gray-50 border-2 border-gray-200 rounded-2xl p-3.5 font-bold outline-none focus:border-orange-600 w-1/3 text-sm">
+                
+                {/* FIX HP: Dikasih flex-col untuk HP, jadi di HP dia atas-bawah, di Laptop nyamping */}
+                <div className="w-full md:max-w-xl flex flex-col md:flex-row gap-3">
+                   <select value={masterCategoryFilter} onChange={e => setMasterCategoryFilter(e.target.value)} className="bg-gray-50 border-2 border-gray-200 rounded-2xl p-3.5 font-bold outline-none focus:border-orange-600 w-full md:w-1/3 text-sm">
                      <option value="All">Semua Kategori</option>{categories.filter(c => c !== 'All').map(c => ( <option key={c} value={c}>{c}</option> ))}
                    </select>
-                   <ModernInput placeholder="🔍 Cari nama menu di sini..." value={masterSearch} onChange={e => setMasterSearch(e.target.value)} className="bg-gray-50 w-2/3" />
+                   <ModernInput placeholder="🔍 Cari nama menu di sini..." value={masterSearch} onChange={e => setMasterSearch(e.target.value)} className="bg-gray-50 w-full md:w-2/3" />
                 </div>
               </div>
               <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-10 bg-gray-50 p-6 rounded-3xl border border-gray-100">
@@ -525,10 +560,10 @@ export default function KasirWarung() {
                 </div>
                 <div><label className="text-[10px] font-black uppercase text-gray-500 mb-2 block ml-2">Nama Menu</label><ModernInput placeholder="Contoh: Es Teh" value={newMenuName} onChange={e => setNewMenuName(e.target.value)} /></div>
                 <div><label className="text-[10px] font-black uppercase text-gray-500 mb-2 block ml-2">Harga</label><ModernInput placeholder="3000" type="number" value={newMenuPrice} onChange={e => setNewMenuPrice(e.target.value)} /></div>
-                <div className="flex items-end"><button onClick={handleAddMenuToMaster} className="w-full h-[54px] bg-orange-600 text-white font-black rounded-2xl shadow-lg hover:bg-orange-700 active:scale-95 transition-all">Simpan Menu 💾</button></div>
+                <div className="flex items-end mt-2 md:mt-0"><button onClick={handleAddMenuToMaster} className="w-full h-[54px] bg-orange-600 text-white font-black rounded-2xl shadow-lg hover:bg-orange-700 active:scale-95 transition-all">Simpan Menu 💾</button></div>
               </div>
               <div className="overflow-x-auto bg-white rounded-2xl border border-gray-100">
-                <table className="w-full text-left">
+                <table className="w-full text-left whitespace-nowrap">
                   <thead className="bg-gray-50">
                     <tr className="border-b-2 text-xs font-black text-gray-400 uppercase select-none">
                       <th className="p-5 cursor-pointer hover:bg-gray-100 transition-colors" onClick={() => requestSort('category')}>Category <span className="text-[8px] ml-1">{getSortIcon('category')}</span></th>
@@ -549,7 +584,7 @@ export default function KasirWarung() {
                       <tr key={m.id} className="border-b hover:bg-gray-50 transition-colors">
                         <td className="p-5"><span className="text-[10px] font-black bg-gray-100 text-gray-600 px-3 py-1 rounded-full uppercase">{m.category}</span></td>
                         <td className="p-5 font-black text-gray-900">
-                          {editingMenuId === m.id ? ( <input type="text" className="border-2 border-orange-300 rounded-lg p-1 w-full outline-none font-bold" value={editName} onChange={e => setEditName(e.target.value)} /> ) : ( m.name )}
+                          {editingMenuId === m.id ? ( <input type="text" className="border-2 border-orange-300 rounded-lg p-1 w-full outline-none font-bold min-w-[150px]" value={editName} onChange={e => setEditName(e.target.value)} /> ) : ( m.name )}
                         </td>
                         <td className="p-5 font-bold text-gray-600">
                           {editingMenuId === m.id ? (
