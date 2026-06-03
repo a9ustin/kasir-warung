@@ -188,19 +188,23 @@ const copyToClipboard = (order: Order) => {
   
   // OPTIMISTIC UPDATE: Centang coretan seketika tanpa delay
   const toggleItemDone = async (orderId: string, itemIndex: number) => {
-    // 1. Update layar saat itu juga (No Delay)
     let newItemsToSave: any = [];
+    
     setOrders(prevOrders => prevOrders.map(o => {
       if (o.id === orderId) {
         const newItems = [...o.items];
-        newItems[itemIndex].isDone = !newItems[itemIndex].isDone;
+        
+        newItems[itemIndex] = { 
+          ...newItems[itemIndex], 
+          isDone: !newItems[itemIndex].isDone 
+        };
+        
         newItemsToSave = newItems;
         return { ...o, items: newItems };
       }
       return o;
     }));
     
-    // 2. Kirim update ke database di background
     if(newItemsToSave.length > 0) {
       await supabase.from('orders').update({ items: newItemsToSave }).eq('id', orderId);
     }
