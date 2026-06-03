@@ -189,7 +189,12 @@ export default function KasirWarung() {
       <div className="hidden print:block w-[58mm] font-mono text-black p-2 mx-auto bg-white text-[11px] leading-snug">
         {printData && (
           <>
-            <div className="text-center mb-4">
+            <div className="text-center mb-4 flex flex-col items-center">
+              <svg className="w-16 h-16 mb-2 text-black" viewBox="0 0 114 114" fill="none" xmlns="http://www.w3.org/2000/svg">
+                <rect width="114" height="114" rx="20" fill="white"/>
+                <path d="M57 95V87M57 19V27M28.5 57H20.5M95 57H87M77.1528 77.1528L71.4959 71.4959M36.8472 36.8472L42.5041 42.5041M77.1528 36.8472L71.4959 42.5041M36.8472 77.1528L42.5041 71.4959" stroke="currentColor" strokeWidth="8" strokeLinecap="round"/>
+                <circle cx="57" cy="57" r="18" fill="currentColor"/>
+              </svg>
               <h2 className="font-bold text-base">KEDAI BU SABAR</h2>
               <p className="text-[10px]">Duwet Lor RT 02 RW 16 Baturetno</p>
               <p className="text-[10px]">083811014351</p>
@@ -218,7 +223,6 @@ export default function KasirWarung() {
               <span>Rp {printData.total.toLocaleString('id-ID')}</span>
             </div>
             
-            {/* Munculin Cash/Kembali cuma kalau pembeli ngasih Cash */}
             {printData.payment_method === 'Cash' && (printData.cash_given || 0) > 0 && (
               <>
                 <div className="flex justify-between">
@@ -400,7 +404,9 @@ export default function KasirWarung() {
                   </h3>
                   {orders.filter(o => { if (status !== 'Done') return o.status === status; return o.status === 'Done' && new Date(o.created_at).toDateString() === new Date().toDateString(); }).map(o => (
                     <div key={o.id} className="bg-gray-50 p-5 rounded-3xl border border-gray-100 mb-5 relative group shadow-sm">
-                      <div className="absolute top-4 right-4 flex flex-col gap-2 items-end z-10 opacity-100 md:opacity-0 md:group-hover:opacity-100 transition-opacity">
+                      
+                      {/* FIX IPAD: Hapus efek hover, tombol selalu muncul di pojok kanan atas */}
+                      <div className="absolute top-4 right-4 flex flex-col gap-2 items-end z-10">
                         <div className="flex gap-2">
                           <button onClick={() => handlePrintOrder(o, trackerCashGiven[o.id])} className="text-[12px] bg-blue-100 text-blue-700 px-2.5 py-1 rounded-lg font-black shadow-sm border border-blue-200">🖨️ Print</button>
                           <button onClick={() => { setEditingOrderId(o.id); setCustomerName(o.customer_name); setCart(o.items); setOrderNote(o.order_note); setPaymentMethod(o.payment_method); setActiveTab('KASIR'); }} className="text-[10px] bg-yellow-500 text-white px-2 py-1 rounded-lg font-bold">Edit</button>
