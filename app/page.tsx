@@ -328,7 +328,7 @@ export default function KasirWarung() {
         {printData && (
           <>
             <div className="text-center mb-4 flex flex-col items-center">
-              <Image src={LogoKBS} alt="Logo Kedai Bu Sabar" width={70} height={70} className="mb-2 grayscale" priority />
+              {/* <Image src={LogoKBS} alt="Logo Kedai Bu Sabar" width={70} height={70} className="mb-2 grayscale" priority /> */}
               <h2 className="font-bold text-base mt-1">KEDAI BU SABAR</h2>
               <p className="text-[10px]">Duwet Lor RT 02 RW 16 Baturetno</p>
               <p className="text-[10px]">083811014351</p>
