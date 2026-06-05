@@ -1,8 +1,7 @@
 'use client';
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect } from 'react';
 import { supabase } from './supabase';
-import Image from 'next/image';
-import LogoKBS from './LogoKBS.svg';
+import { printReceipt, type PrintData } from './escpos-print'; // PATCH 1: Import fungsi print baru
 
 const THEME = {
   bg: 'bg-[#FAF9F6]',         
@@ -17,15 +16,9 @@ const THEME = {
 };
 
 type MenuItem = { id: string; name: string; price: number; category: string };
-
-// FIX: qty pakai number saja, tidak boleh string/any
-type CartItem = MenuItem & { qty: number; note: string; isDone: boolean; isCustom?: boolean; orderType: 'Dine In' | 'Take Away' };
-
+type CartItem = MenuItem & { qty: number | ''; note: string; isDone: boolean; isCustom?: boolean; orderType: 'Dine In' | 'Take Away' };
 type Order = { 
-  id: string; customer_name: string; order_note: string; items: CartItem[]; total: number; 
-  status: 'To Do' | 'In Progress' | 'Done'; 
-  payment_method: 'Belum Bayar' | 'Cash' | 'QRIS Mandiri' | 'QRIS Gopay'; 
-  created_at: string;
+  id: string; customer_name: string; order_note: string; items: CartItem[]; total: number; status: 'To Do' | 'In Progress' | 'Done'; payment_method: 'Belum Bayar' | 'Cash' | 'QRIS Mandiri' | 'QRIS Gopay'; created_at: string;
 };
 
 const ModernInput = (props: React.InputHTMLAttributes<HTMLInputElement>) => (
@@ -56,13 +49,15 @@ export default function KasirWarung() {
   const [editingOrderId, setEditingOrderId] = useState<string | null>(null);
   const [isMobileCartOpen, setIsMobileCartOpen] = useState(false);
 
-  // State Kalkulator Cash (Kasir & Dapur)
+  // State Kalkulator Cash
   const [cashGiven, setCashGiven] = useState<string>('');
   const [trackerCashGiven, setTrackerCashGiven] = useState<Record<string, string>>({});
 
-  // FIX: printData + useEffect menggantikan setTimeout yang rapuh
-  const [printData, setPrintData] = useState<any>(null);
-  const printTriggered = useRef(false);
+  // PATCH 2: State khusus untuk Web Bluetooth Print
+  const [printStatus, setPrintStatus] = useState<string | null>(null);
+
+  // Custom Modal State
+  const [dialog, setDialog] = useState<{isOpen: boolean; message: string; onConfirm: () => void}>({isOpen: false, message: '', onConfirm: () => {}});
 
   const [newMenuName, setNewMenuName] = useState('');
   const [newMenuPrice, setNewMenuPrice] = useState('');
@@ -71,100 +66,94 @@ export default function KasirWarung() {
   const [customPrice, setCustomPrice] = useState('');
   const [toastMessage, setToastMessage] = useState<string | null>(null);
 
-  // --- FETCH & REALTIME ---
+  // --- FETCH & REALTIME DENGAN DEBOUNCE ---
   useEffect(() => {
-    fetchMenus(); fetchOrders();
-    const channel = supabase.channel('realtime-orders')
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'orders' }, () => fetchOrders())
-      .subscribe();
-    return () => { supabase.removeChannel(channel); };
+    fetchMenus(); 
+    fetchOrders();
+    let debounceTimer: NodeJS.Timeout;
+
+    const channel = supabase.channel('realtime-orders').on('postgres_changes', { event: '*', schema: 'public', table: 'orders' }, () => {
+      clearTimeout(debounceTimer);
+      debounceTimer = setTimeout(() => {
+        fetchOrders();
+      }, 500);
+    }).subscribe();
+
+    return () => { 
+      supabase.removeChannel(channel); 
+      clearTimeout(debounceTimer);
+    };
   }, []);
 
-  // FIX: Print dipicu lewat useEffect, bukan setTimeout — lebih andal
-  useEffect(() => {
-    if (printData && !printTriggered.current) {
-      printTriggered.current = true;
-      // Beri sedikit waktu React untuk render struk dulu, lalu print
-      const timer = setTimeout(() => {
-        window.print();
-        // Reset setelah print supaya bisa print lagi nanti
-        setTimeout(() => {
-          setPrintData(null);
-          printTriggered.current = false;
-        }, 500);
-      }, 150);
-      return () => clearTimeout(timer);
-    }
-  }, [printData]);
+  // PATCH 3: useEffect bawaan window.print() dihapus
 
-  const showToast = (message: string) => { 
-    setToastMessage(message); 
-    setTimeout(() => setToastMessage(null), 1500); 
+  const showToast = (message: string) => { setToastMessage(message); setTimeout(() => setToastMessage(null), 1500); };
+  
+  const confirmAction = (message: string, action: () => void) => {
+    setDialog({ isOpen: true, message, onConfirm: () => { action(); setDialog(prev => ({...prev, isOpen: false})); } });
   };
 
-  const fetchMenus = async () => { 
-    const { data } = await supabase.from('menus').select('*'); 
-    if (data) setMenuList(data); 
-  };
-
-  const fetchOrders = async () => { 
-    const { data } = await supabase.from('orders').select('*').order('created_at', { ascending: false }); 
-    if (data) setOrders(data); 
-  };
+  const fetchMenus = async () => { const { data } = await supabase.from('menus').select('*'); if (data) setMenuList(data); };
+  const fetchOrders = async () => { const { data } = await supabase.from('orders').select('*').order('created_at', { ascending: false }); if (data) setOrders(data); };
 
   const copyToClipboard = (order: Order) => {
     const itemText = order.items.map(it => {
       const noteText = it.note ? ` (${it.note})` : '';
-      return `- ${it.qty}x ${it.name}${noteText} (Rp ${(it.qty * it.price).toLocaleString('id-ID')})`;
+      return `- ${it.qty}x ${it.name}${noteText} (Rp ${(Number(it.qty) * it.price).toLocaleString('id-ID')})`;
     }).join('\n');
+    
     const text = `${itemText}\n\n*Total: Rp ${order.total.toLocaleString('id-ID')}*\n\n*Terima Kasih!* 🙏`;
     navigator.clipboard.writeText(text); 
     showToast('Pesanan disalin!');
   };
 
-  // FIX: Tidak ada lagi setTimeout di sini — cukup set printData, useEffect yang handle
-  const handlePrintCart = () => {
+  // PATCH 4: Fungsi Print menggunakan escpos-print
+  const handlePrintCart = async () => {
     if (!customerName || cart.length === 0) return showToast('Keranjang masih kosong!');
-    setPrintData({
-      created_at: new Date().toISOString(), 
-      customer_name: customerName, 
-      payment_method: paymentMethod, 
+    const data: PrintData = {
+      created_at: new Date().toISOString(),
+      customer_name: customerName,
+      payment_method: paymentMethod,
       order_note: orderNote,
-      items: cart.map(c => ({...c, qty: Number(c.qty) || 1})), 
-      total: totalCart, 
-      cash_given: parseInt(cashGiven) || 0
+      items: cart.map(c => ({ ...c, qty: Number(c.qty) || 1 })),
+      total: totalCart,
+      cash_given: parseInt(cashGiven) || 0,
+    };
+    await printReceipt(data, (msg) => {
+      setPrintStatus(msg);
+      setTimeout(() => setPrintStatus(null), 3000);
     });
   };
 
-  const handlePrintOrder = (order: Order, overrideCash?: string) => {
-    setPrintData({ ...order, cash_given: parseInt(overrideCash || '0') });
+  const handlePrintOrder = async (order: Order, overrideCash?: string) => {
+    const data: PrintData = {
+      ...order,
+      cash_given: parseInt(overrideCash || '0'),
+    };
+    await printReceipt(data, (msg) => {
+      setPrintStatus(msg);
+      setTimeout(() => setPrintStatus(null), 3000);
+    });
   };
 
-  // --- FUNGSI MASTER MENU ---
   const handleUpdateMenu = async (id: string) => {
     if (!editName || !editPrice) return showToast('Nama/harga kosong! ⚠️');
-    const { error } = await supabase.from('menus').update({ name: editName, price: parseInt(editPrice) }).eq('id', id);
-    if (!error) { setEditingMenuId(null); fetchMenus(); showToast('Menu diupdate! ✅'); } 
-    else showToast('Gagal update ❌');
+    const { error } = await supabase.from('menus').update({ name: editName, price: parseInt(editPrice) || 0 }).eq('id', id);
+    if (!error) { setEditingMenuId(null); fetchMenus(); showToast('Menu diupdate! ✅'); } else showToast('Gagal update ❌');
   };
 
   const handleAddMenuToMaster = async () => {
     if (!newMenuName || !newMenuPrice) return showToast('Isi data lengkap!');
-    const newMenu = { name: newMenuName, price: parseInt(newMenuPrice), category: newMenuCategory };
+    const newMenu = { name: newMenuName, price: parseInt(newMenuPrice) || 0, category: newMenuCategory };
     const { data, error } = await supabase.from('menus').insert([newMenu]).select();
-    if (!error && data) { 
-      setMenuList([...menuList, data[0]]); 
-      setNewMenuName(''); 
-      setNewMenuPrice(''); 
-      showToast('Menu ditambah! 💾'); 
-    }
+    if (!error && data) { setMenuList([...menuList, data[0]]); setNewMenuName(''); setNewMenuPrice(''); showToast('Menu ditambah! 💾'); }
   };
 
-  const handleDeleteMenuFromMaster = async (id: string) => {
-    if(confirm('Hapus menu ini?')) { 
+  const handleDeleteMenuFromMaster = (id: string) => {
+    confirmAction('Yakin ingin menghapus menu ini dari master?', async () => {
       const { error } = await supabase.from('menus').delete().eq('id', id); 
-      if (!error) { setMenuList(menuList.filter(m => m.id !== id)); showToast('Dihapus! 🗑️'); } 
-    }
+      if (!error) { setMenuList(menuList.filter(m => m.id !== id)); showToast('Dihapus! 🗑️'); }
+    });
   };
 
   const requestSort = (key: keyof MenuItem) => {
@@ -172,135 +161,89 @@ export default function KasirWarung() {
     if (sortConfig.key === key && sortConfig.direction === 'asc') direction = 'desc';
     setSortConfig({ key, direction });
   };
-
+  
   const getSortIcon = (key: keyof MenuItem) => {
-    if (sortConfig.key !== key) return '↕️'; 
-    return sortConfig.direction === 'asc' ? '🔼' : '🔽';
+    if (sortConfig.key !== key) return '↕️'; return sortConfig.direction === 'asc' ? '🔼' : '🔽';
   };
 
   const categories = ['All', ...Array.from(new Set(menuList.map(m => m.category)))];
-  const filteredMenu = menuList.filter(m => 
-    (activeCategory === 'All' || m.category === activeCategory) && 
-    m.name.toLowerCase().includes(searchQuery.toLowerCase())
-  );
+  const filteredMenu = menuList.filter(m => (activeCategory === 'All' || m.category === activeCategory) && m.name.toLowerCase().includes(searchQuery.toLowerCase()));
 
-  // --- FUNGSI CART & KASIR ---
   const addToCart = (item: MenuItem) => {
     const idx = cart.findIndex(c => c.id === item.id);
-    if (idx !== -1) { 
-      const newCart = [...cart]; 
-      newCart[idx].qty += 1; 
-      setCart(newCart); 
-    }
+    if (idx !== -1) { const newCart = [...cart]; newCart[idx].qty = Number(newCart[idx].qty) + 1; setCart(newCart); }
     else { setCart([...cart, { ...item, qty: 1, note: '', isDone: false, orderType: 'Take Away' }]); }
   };
 
   const addCustomItemToCart = () => {
     if (!customName || !customPrice) return showToast('Isi data dadakan!');
-    setCart([...cart, { 
-      // FIX: pakai crypto.randomUUID() biar ID tidak tabrakan
-      id: `custom-${crypto.randomUUID()}`, 
-      name: customName, 
-      price: parseInt(customPrice), 
-      category: 'Dadakan', 
-      qty: 1, 
-      note: '', 
-      isDone: false, 
-      isCustom: true, 
-      orderType: 'Take Away' 
-    }]);
-    setCustomName(''); 
-    setCustomPrice(''); 
-    showToast('Masuk keranjang!');
+    setCart([...cart, { id: crypto.randomUUID(), name: customName, price: parseInt(customPrice) || 0, category: 'Dadakan', qty: 1, note: '', isDone: false, isCustom: true, orderType: 'Take Away' }]);
+    setCustomName(''); setCustomPrice(''); showToast('Masuk keranjang!');
   };
 
-  // FIX: qty sekarang selalu number, tidak ada lagi `as any`
   const updateQtyDirect = (idx: number, val: string) => {
-    const newCart = [...cart];
-    const num = parseInt(val);
-    // Kalau input kosong atau bukan angka, set ke 1 (nilai minimum)
-    newCart[idx].qty = isNaN(num) || num < 1 ? 1 : num;
+    const newCart = [...cart]; 
+    newCart[idx].qty = val === '' ? '' : Number(val);
     setCart(newCart);
   };
-
+  
   const handleQtyBlur = (idx: number) => {
-    const newCart = [...cart]; 
-    if (!newCart[idx].qty || newCart[idx].qty <= 0) newCart[idx].qty = 1;
+    const newCart = [...cart]; if (newCart[idx].qty === '' || Number(newCart[idx].qty) <= 0) newCart[idx].qty = 1;
     setCart(newCart);
   };
-
+  
   const updateQty = (idx: number, delta: number) => {
-    const newCart = [...cart]; 
-    newCart[idx].qty = (Number(newCart[idx].qty) || 0) + delta;
-    if (newCart[idx].qty <= 0) setCart(newCart.filter((_, i) => i !== idx)); 
-    else setCart(newCart);
+    const newCart = [...cart]; newCart[idx].qty = (Number(newCart[idx].qty) || 0) + delta;
+    if (Number(newCart[idx].qty) <= 0) setCart(newCart.filter((_, i) => i !== idx)); else setCart(newCart);
   };
 
   const totalCart = cart.reduce((s, i) => s + (i.price * (Number(i.qty) || 0)), 0);
 
-  const clearKasir = () => { 
-    setCart([]); setCustomerName(''); setOrderNote(''); 
-    setPaymentMethod('Belum Bayar'); setCashGiven(''); 
-    setEditingOrderId(null); setIsMobileCartOpen(false); 
-  };
+  const clearKasir = () => { setCart([]); setCustomerName(''); setOrderNote(''); setPaymentMethod('Belum Bayar'); setCashGiven(''); setEditingOrderId(null); setIsMobileCartOpen(false); };
 
   const submitOrder = async () => {
     if (!customerName || cart.length === 0) return showToast('Data belum lengkap!');
     const cleanCart = cart.map(c => ({...c, qty: Number(c.qty) || 1}));
-    const orderData = { 
-      customer_name: customerName, order_note: orderNote, 
-      items: cleanCart, total: totalCart, 
-      status: 'To Do', payment_method: paymentMethod 
-    };
-    const { error } = editingOrderId 
-      ? await supabase.from('orders').update(orderData).eq('id', editingOrderId) 
-      : await supabase.from('orders').insert([orderData]);
-    if (!error) { clearKasir(); setActiveTab('TRACKER'); showToast('Dikirim ke dapur! 🍳'); } 
-    else showToast('Gagal proses!');
+    const orderData = { customer_name: customerName, order_note: orderNote, items: cleanCart, total: totalCart, status: 'To Do', payment_method: paymentMethod };
+    const { error } = editingOrderId ? await supabase.from('orders').update(orderData).eq('id', editingOrderId) : await supabase.from('orders').insert([orderData]);
+    if (!error) { clearKasir(); setActiveTab('TRACKER'); showToast('Dikirim ke dapur! 🍳'); } else showToast('Gagal proses!');
   };
 
   const updateStatus = async (id: string, s: string) => { 
-    setOrders(prev => prev.map(o => o.id === id ? { ...o, status: s as any } : o));
-    await supabase.from('orders').update({ status: s }).eq('id', id);
+    setOrders(prev => prev.map(o => o.id === id ? { ...o, status: s as any } : o)); 
+    await supabase.from('orders').update({ status: s }).eq('id', id); 
   };
   
   const updatePayment = async (id: string, p: string) => { 
-    // FIX: tambah optimistic update supaya konsisten
     setOrders(prev => prev.map(o => o.id === id ? { ...o, payment_method: p as any } : o));
     await supabase.from('orders').update({ payment_method: p }).eq('id', id); 
   };
   
-  const deleteOrder = async (id: string) => { 
-    if (confirm('Batalkan pesanan ini?')) { 
-      setOrders(prev => prev.filter(o => o.id !== id));
+  const deleteOrder = (id: string) => { 
+    confirmAction('Batalkan pesanan ini secara permanen?', async () => {
+      setOrders(prev => prev.filter(o => o.id !== id)); 
       await supabase.from('orders').delete().eq('id', id); 
       showToast('Dibatalkan ❌'); 
-    } 
+    });
   };
   
-  // FIX: Race condition dihilangkan — data disiapkan SEBELUM setState, bukan di dalamnya
   const toggleItemDone = async (orderId: string, itemIndex: number) => {
-    // 1. Cari order langsung dari state saat ini
     const order = orders.find(o => o.id === orderId);
     if (!order) return;
 
-    // 2. Buat salinan items yang sudah diupdate — SEBELUM setState dipanggil
     const newItems = order.items.map((item, i) =>
       i === itemIndex ? { ...item, isDone: !item.isDone } : item
     );
 
-    // 3. Update UI dulu (optimistic) — newItems sudah pasti terisi
     setOrders(prev => prev.map(o =>
       o.id === orderId ? { ...o, items: newItems } : o
     ));
 
-    // 4. Kirim ke Supabase
     const { error } = await supabase
       .from('orders')
       .update({ items: newItems })
       .eq('id', orderId);
 
-    // 5. Kalau gagal, rollback UI ke kondisi sebelumnya
     if (error) {
       setOrders(prev => prev.map(o =>
         o.id === orderId ? { ...o, items: order.items } : o
@@ -323,60 +266,24 @@ export default function KasirWarung() {
 
   return (
     <>
-      {/* ---------------- STRUK GAIB (HANYA MUNCUL DI PRINTER) ---------------- */}
-      <div className="hidden print:block w-[58mm] font-mono text-black p-2 mx-auto bg-white text-[11px] leading-snug">
-        {printData && (
-          <>
-            <div className="text-center mb-4 flex flex-col items-center">
-              {/* <Image src={LogoKBS} alt="Logo Kedai Bu Sabar" width={70} height={70} className="mb-2 grayscale" priority /> */}
-              <h2 className="font-bold text-base mt-1">KEDAI BU SABAR</h2>
-              <p className="text-[10px]">Duwet Lor RT 02 RW 16 Baturetno</p>
-              <p className="text-[10px]">083811014351</p>
-              <p>-------------------------</p>
+      {/* CUSTOM DIALOG MODAL */}
+      {dialog.isOpen && (
+        <div className="fixed inset-0 z-[100] bg-gray-900/40 backdrop-blur-sm flex items-center justify-center p-4 transition-opacity">
+          <div className="bg-white p-6 rounded-3xl shadow-2xl w-full max-w-sm border border-gray-100 animate-in fade-in zoom-in-95 duration-200">
+            <h3 className="font-black text-xl mb-2 text-gray-900">Konfirmasi</h3>
+            <p className="text-gray-600 font-medium mb-6 text-sm">{dialog.message}</p>
+            <div className="flex gap-3 justify-end">
+              <button onClick={() => setDialog(prev => ({...prev, isOpen: false}))} className="px-5 py-2.5 rounded-xl font-bold text-gray-600 bg-gray-100 hover:bg-gray-200 transition-colors">Batal</button>
+              <button onClick={dialog.onConfirm} className="px-5 py-2.5 rounded-xl font-bold text-white bg-red-600 hover:bg-red-700 shadow-md transition-colors">Ya, Lanjutkan</button>
             </div>
-            <div className="mb-2">
-              <p>Tgl: {new Date(printData.created_at).toLocaleString('id-ID')}</p>
-              <p>Nama: {printData.customer_name}</p>
-              {printData.order_note && <p>Ket: {printData.order_note}</p>}
-            </div>
-            <p>-------------------------</p>
-            <div className="mb-2">
-              {printData.items.map((item: any, idx: number) => (
-                <div key={idx} className="mb-1">
-                  <p className="font-bold">{item.name} {item.orderType === 'Take Away' ? '(Bks)' : ''}</p>
-                  <div className="flex justify-between">
-                    <span>{item.qty} x {item.price.toLocaleString('id-ID')}</span>
-                    <span>{(item.qty * item.price).toLocaleString('id-ID')}</span>
-                  </div>
-                </div>
-              ))}
-            </div>
-            <p>-------------------------</p>
-            <div className="flex justify-between font-black text-sm mb-2">
-              <span>TOTAL</span>
-              <span>Rp {printData.total.toLocaleString('id-ID')}</span>
-            </div>
-            
-            {printData.payment_method === 'Cash' && (printData.cash_given || 0) > 0 && (
-              <>
-                <div className="flex justify-between">
-                  <span>Tunai</span><span>Rp {(printData.cash_given || 0).toLocaleString('id-ID')}</span>
-                </div>
-                <div className="flex justify-between font-bold">
-                  <span>Kembali</span><span>Rp {Math.max(0, (printData.cash_given || 0) - printData.total).toLocaleString('id-ID')}</span>
-                </div>
-              </>
-            )}
+          </div>
+        </div>
+      )}
 
-            <div className="text-center mt-6">
-              <p className="font-bold">Terima Kasih!</p>
-            </div>
-          </>
-        )}
-      </div>
+      {/* PATCH 5: Struk HTML Gaib (hidden print:block) sudah dihapus dari sini */}
 
-      {/* ---------------- APLIKASI UTAMA (SEMBUNYI SAAT PRINT) ---------------- */}
-      <div className={`print:hidden min-h-screen ${THEME.bg} ${THEME.secondary} font-sans pb-10`}>
+      {/* APLIKASI UTAMA */}
+      <div className={`min-h-screen ${THEME.bg} ${THEME.secondary} font-sans pb-10`}>
         {/* NAVBAR */}
         <div className="bg-white/90 backdrop-blur-md sticky top-0 z-40 p-4 border-b border-gray-100 mb-6 shadow-sm">
           <div className="flex flex-wrap gap-4 items-center justify-between w-full px-2 md:px-6">
@@ -392,7 +299,7 @@ export default function KasirWarung() {
         </div>
 
         <div className="w-full px-4 md:px-10">
-          {/* --- HALAMAN KASIR --- */}
+          {/* HALAMAN KASIR */}
           {activeTab === 'KASIR' && (
             <div className="grid grid-cols-1 xl:grid-cols-12 gap-8 items-start pb-28 xl:pb-0">
               <div className="xl:col-span-8">
@@ -492,10 +399,10 @@ export default function KasirWarung() {
                          <button onClick={() => setCashGiven('50000')} className="px-3 py-1.5 bg-white border border-orange-300 rounded-lg text-xs font-black shrink-0 text-orange-700 shadow-sm">50rb</button>
                          <button onClick={() => setCashGiven('100000')} className="px-3 py-1.5 bg-white border border-orange-300 rounded-lg text-xs font-black shrink-0 text-orange-700 shadow-sm">100rb</button>
                       </div>
-                      {parseInt(cashGiven) > 0 && (
+                      {(parseInt(cashGiven) || 0) > 0 && (
                         <div className="mt-3 text-right bg-white p-3 rounded-xl border border-orange-100">
                            <p className="text-[10px] font-black text-orange-400 uppercase tracking-widest">Kembalian:</p>
-                           <p className="text-xl font-black text-orange-600">Rp {Math.max(0, parseInt(cashGiven) - totalCart).toLocaleString('id-ID')}</p>
+                           <p className="text-xl font-black text-orange-600">Rp {Math.max(0, (parseInt(cashGiven) || 0) - totalCart).toLocaleString('id-ID')}</p>
                         </div>
                       )}
                     </div>
@@ -531,7 +438,7 @@ export default function KasirWarung() {
             </div>
           )}
 
-          {/* --- HALAMAN TRACKER (DAPUR) --- */}
+          {/* HALAMAN TRACKER (DAPUR) */}
           {activeTab === 'TRACKER' && (
             <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
               {(['To Do', 'Done'] as const).map(status => (
@@ -598,7 +505,7 @@ export default function KasirWarung() {
                              <div className="flex-1">
                                <div className="flex justify-between">
                                  <p className={`text-sm font-bold transition-all ${it.isDone ? 'line-through text-gray-400' : 'text-gray-900'}`}>{it.qty}x {it.name}</p>
-                                 <span className="text-gray-400 font-medium text-[11px] mt-0.5">Rp {(it.qty * it.price).toLocaleString('id-ID')}</span>
+                                 <span className="text-gray-400 font-medium text-[11px] mt-0.5">Rp {(Number(it.qty) * it.price).toLocaleString('id-ID')}</span>
                                </div>
                                <div className="flex gap-2 items-center mt-1">
                                  <span className={`text-[9px] font-bold px-1 rounded ${it.orderType === 'Take Away' ? 'bg-orange-100 text-orange-600' : 'bg-green-100 text-green-600'}`}>{it.orderType}</span>
@@ -625,7 +532,7 @@ export default function KasirWarung() {
             </div>
           )}
 
-          {/* --- HALAMAN REKAP --- */}
+          {/* HALAMAN REKAP */}
           {activeTab === 'REKAP' && (
             <div className="max-w-5xl mx-auto">
               <div className="flex flex-col md:flex-row justify-between items-center mb-10 gap-4">
@@ -662,7 +569,7 @@ export default function KasirWarung() {
                             <span className="font-black text-sm border-b border-dashed border-gray-400 pb-0.5">{o.customer_name}</span>
                             <div className="absolute left-4 top-full mt-1 w-56 bg-white border border-gray-200 shadow-xl rounded-2xl p-4 z-50 hidden group-hover:flex flex-col gap-1">
                                <p className="text-[9px] font-black text-gray-400 uppercase tracking-widest border-b pb-2 mb-1">Detail Pesanan</p>
-                               {o.items.map((it, i) => (<div key={i} className="flex justify-between text-xs font-bold text-gray-700 whitespace-normal"><span>{it.qty}x {it.name}</span><span className="text-gray-400 shrink-0 ml-2">Rp {(it.qty * it.price).toLocaleString('id-ID')}</span></div>))}
+                               {o.items.map((it, i) => (<div key={i} className="flex justify-between text-xs font-bold text-gray-700 whitespace-normal"><span>{it.qty}x {it.name}</span><span className="text-gray-400 shrink-0 ml-2">Rp {(Number(it.qty) * it.price).toLocaleString('id-ID')}</span></div>))}
                             </div>
                           </td>
                           <td className="p-4"><span className={`text-[10px] font-bold px-2 py-1 rounded-lg whitespace-nowrap ${o.payment_method.includes('QRIS') ? 'bg-blue-100 text-blue-700' : 'bg-orange-100 text-orange-700'}`}>{o.payment_method}</span></td>
@@ -678,7 +585,7 @@ export default function KasirWarung() {
             </div>
           )}
 
-          {/* --- HALAMAN MASTER --- */}
+          {/* HALAMAN MASTER */}
           {activeTab === 'MASTER' && (
             <div className="bg-white p-4 md:p-8 rounded-3xl md:rounded-[40px] shadow-sm border w-full">
               <div className="flex flex-col md:flex-row justify-between items-center mb-6 md:mb-8 gap-4">
@@ -750,6 +657,15 @@ export default function KasirWarung() {
           )}
         </div>
 
+        {/* PATCH 6: Notifikasi Status Print ESC/POS Web Bluetooth */}
+        {printStatus && (
+          <div className="fixed top-6 left-1/2 transform -translate-x-1/2 bg-blue-600 text-white px-6 py-3 rounded-full shadow-2xl z-[101] flex items-center gap-2">
+            <span className="animate-pulse">🖨️</span>
+            <span className="font-bold text-sm">{printStatus}</span>
+          </div>
+        )}
+
+        {/* Notifikasi Toast Biasa */}
         {toastMessage && (
           <div className="fixed bottom-10 left-1/2 transform -translate-x-1/2 bg-gray-900 text-white px-6 py-3 rounded-full shadow-2xl z-[100] flex items-center gap-2 animate-bounce">
             <span className="font-bold text-sm">{toastMessage}</span>
