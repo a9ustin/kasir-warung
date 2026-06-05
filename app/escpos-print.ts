@@ -1,7 +1,3 @@
-// ============================================================
-// escpos-print.ts — Blueprint ECO58D via Web Bluetooth
-// ============================================================
-
 /// <reference types="@types/web-bluetooth" />
 
 export type PrintData = {
@@ -14,9 +10,11 @@ export type PrintData = {
   cash_given?: number;
 };
 
+// ============================================================
+// ESC/POS — untuk Web Bluetooth (HP Android)
+// ============================================================
 const ESC = 0x1b;
 const GS  = 0x1d;
-
 const cmd = {
   INIT:         [ESC, 0x40],
   ALIGN_LEFT:   [ESC, 0x61, 0x00],
@@ -71,8 +69,6 @@ export function buildReceipt(data: PrintData): Uint8Array {
   const nl  = () => add(cmd.LF);
 
   add(cmd.INIT);
-
-  // HEADER
   add(cmd.ALIGN_CENTER, cmd.FONT_MEDIUM, cmd.BOLD_ON);
   add('KEDAI BU SABAR\n');
   add(cmd.FONT_NORMAL, cmd.BOLD_OFF);
@@ -81,7 +77,6 @@ export function buildReceipt(data: PrintData): Uint8Array {
   add('--------------------------------\n');
   nl();
 
-  // INFO
   add(cmd.ALIGN_LEFT);
   const tgl = new Date(data.created_at).toLocaleString('id-ID', {
     day: '2-digit', month: '2-digit', year: 'numeric',
@@ -92,7 +87,6 @@ export function buildReceipt(data: PrintData): Uint8Array {
   if (data.order_note) add(`Ket  : ${data.order_note}\n`);
   add('--------------------------------\n');
 
-  // ITEMS
   for (const item of data.items) {
     const qty = Number(item.qty) || 1;
     const label = item.name + (item.orderType === 'Take Away' ? ' (Bks)' : '');
@@ -107,16 +101,13 @@ export function buildReceipt(data: PrintData): Uint8Array {
   }
 
   add('--------------------------------\n');
-
-  // TOTAL
   add(cmd.BOLD_ON, cmd.FONT_MEDIUM);
   add(padRow('TOTAL', `Rp ${data.total.toLocaleString('id-ID')}`) + '\n');
   add(cmd.FONT_NORMAL, cmd.BOLD_OFF);
 
-  // KEMBALIAN
   if (data.payment_method === 'Cash' && (data.cash_given ?? 0) > 0) {
     add('--------------------------------\n');
-    add(padRow('Tunai', `Rp ${(data.cash_given!).toLocaleString('id-ID')}`) + '\n');
+    add(padRow('Tunai', `Rp ${data.cash_given!.toLocaleString('id-ID')}`) + '\n');
     const kembali = Math.max(0, data.cash_given! - data.total);
     add(cmd.BOLD_ON);
     add(padRow('Kembali', `Rp ${kembali.toLocaleString('id-ID')}`) + '\n');
@@ -129,24 +120,18 @@ export function buildReceipt(data: PrintData): Uint8Array {
   add(cmd.BOLD_OFF);
   nl(); nl();
   add(cmd.FEED_CUT);
-
   return bytes(...chunks);
 }
 
-// -------- WEB BLUETOOTH --------
-// UUID ini akan diupdate setelah bt-scanner.html dijalankan
-// Untuk sementara pakai acceptAllDevices agar printer muncul di list
-const PRINTER_SERVICE = '000018f0-0000-1000-8000-00805f9b34fb';
-const PRINTER_CHAR    = '00002af1-0000-1000-8000-00805f9b34fb';
-
-// UUID alternatif yang umum dipakai printer thermal BLE
+// ============================================================
+// Web Bluetooth — HP Android Chrome
+// ============================================================
 const FALLBACK_SERVICES = [
   '000018f0-0000-1000-8000-00805f9b34fb',
   '49535343-fe7d-4ae5-8fa9-9fafd205e455',
   'e7810a71-73ae-499d-8c15-faa9aef0c3f2',
   '0000ff00-0000-1000-8000-00805f9b34fb',
 ];
-
 const FALLBACK_CHARS = [
   '00002af1-0000-1000-8000-00805f9b34fb',
   '49535343-8841-43f4-a8d4-ecbe34729bb3',
@@ -160,16 +145,14 @@ let cachedChar: BluetoothRemoteGATTCharacteristic | null = null;
 async function getCharacteristic(): Promise<BluetoothRemoteGATTCharacteristic> {
   if (cachedChar && cachedDevice?.gatt?.connected) return cachedChar;
 
-  // acceptAllDevices: true → semua device BT muncul di list, tidak filter nama
   const device = await navigator.bluetooth.requestDevice({
     acceptAllDevices: true,
     optionalServices: FALLBACK_SERVICES,
   });
 
   const server = await device.gatt!.connect();
-
-  // Coba tiap service UUID sampai ketemu yang cocok
   let foundChar: BluetoothRemoteGATTCharacteristic | null = null;
+
   for (const svcUUID of FALLBACK_SERVICES) {
     try {
       const service = await server.getPrimaryService(svcUUID);
@@ -177,25 +160,21 @@ async function getCharacteristic(): Promise<BluetoothRemoteGATTCharacteristic> {
         try {
           const ch = await service.getCharacteristic(charUUID);
           if (ch.properties.write || ch.properties.writeWithoutResponse) {
-            foundChar = ch;
-            break;
+            foundChar = ch; break;
           }
-        } catch { /* char tidak ada, lanjut */ }
+        } catch { /* lanjut */ }
       }
       if (foundChar) break;
-    } catch { /* service tidak ada, lanjut */ }
+    } catch { /* lanjut */ }
   }
 
-  if (!foundChar) throw new Error('Tidak ada characteristic WRITE ditemukan di printer ini.');
+  if (!foundChar) throw new Error('Printer tidak ditemukan. Pastikan printer ON dan Bluetooth aktif.');
 
   cachedDevice = device;
   cachedChar = foundChar;
-
   device.addEventListener('gattserverdisconnected', () => {
-    cachedDevice = null;
-    cachedChar = null;
+    cachedDevice = null; cachedChar = null;
   });
-
   return foundChar;
 }
 
@@ -207,32 +186,127 @@ async function writeInChunks(char: BluetoothRemoteGATTCharacteristic, data: Uint
   }
 }
 
+// ============================================================
+// Print via window.print() — Laptop / USB
+// Inject iframe tersembunyi berisi HTML struk, print, lalu hapus
+// ============================================================
+function printViaHTML(data: PrintData): void {
+  const tgl = new Date(data.created_at).toLocaleString('id-ID', {
+    day: '2-digit', month: '2-digit', year: 'numeric',
+    hour: '2-digit', minute: '2-digit'
+  });
+
+  const itemsHTML = data.items.map(item => {
+    const qty = Number(item.qty) || 1;
+    const subtotal = (qty * item.price).toLocaleString('id-ID');
+    const label = item.name + (item.orderType === 'Take Away' ? ' (Bks)' : '');
+    const noteHTML = item.note ? `<div class="note">*${item.note}*</div>` : '';
+    return `
+      <div class="item">
+        <div class="item-name">${label}</div>
+        ${noteHTML}
+        <div class="item-row">
+          <span>${qty} x ${item.price.toLocaleString('id-ID')}</span>
+          <span>Rp ${subtotal}</span>
+        </div>
+      </div>`;
+  }).join('');
+
+  const cashHTML = (data.payment_method === 'Cash' && (data.cash_given ?? 0) > 0) ? `
+    <div class="divider"></div>
+    <div class="item-row"><span>Tunai</span><span>Rp ${data.cash_given!.toLocaleString('id-ID')}</span></div>
+    <div class="item-row bold"><span>Kembali</span><span>Rp ${Math.max(0, data.cash_given! - data.total).toLocaleString('id-ID')}</span></div>
+  ` : '';
+
+  const html = `<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    font-family: 'Courier New', Courier, monospace;
+    font-size: 12px;
+    width: 58mm;
+    color: #000;
+    background: #fff;
+    padding: 4px;
+  }
+  .center { text-align: center; }
+  .bold { font-weight: bold; }
+  .store-name { font-size: 15px; font-weight: bold; text-align: center; margin: 4px 0 2px; }
+  .store-info { font-size: 10px; text-align: center; }
+  .divider { border-top: 1px dashed #000; margin: 6px 0; }
+  .info-row { margin: 2px 0; font-size: 11px; }
+  .item { margin: 4px 0; }
+  .item-name { font-weight: bold; font-size: 12px; }
+  .note { font-size: 10px; padding-left: 4px; }
+  .item-row { display: flex; justify-content: space-between; font-size: 11px; padding-left: 4px; }
+  .total-row { display: flex; justify-content: space-between; font-weight: bold; font-size: 14px; margin: 4px 0; }
+  .footer { text-align: center; font-weight: bold; margin-top: 8px; }
+  @page { margin: 0; size: 58mm auto; }
+</style>
+</head>
+<body>
+  <div class="store-name">KEDAI BU SABAR</div>
+  <div class="store-info">Duwet Lor RT 02 RW 16 Baturetno</div>
+  <div class="store-info">083811014351</div>
+  <div class="divider"></div>
+  <div class="info-row">Tgl  : ${tgl}</div>
+  <div class="info-row">Nama : ${data.customer_name}</div>
+  ${data.order_note ? `<div class="info-row">Ket  : ${data.order_note}</div>` : ''}
+  <div class="divider"></div>
+  ${itemsHTML}
+  <div class="divider"></div>
+  <div class="total-row"><span>TOTAL</span><span>Rp ${data.total.toLocaleString('id-ID')}</span></div>
+  ${cashHTML}
+  <div class="footer">Terima Kasih!</div>
+</body>
+</html>`;
+
+  // Inject ke iframe tersembunyi → print → hapus
+  const iframe = document.createElement('iframe');
+  iframe.style.cssText = 'position:fixed;top:-9999px;left:-9999px;width:58mm;height:0;border:none;';
+  document.body.appendChild(iframe);
+  iframe.contentDocument!.open();
+  iframe.contentDocument!.write(html);
+  iframe.contentDocument!.close();
+
+  setTimeout(() => {
+    iframe.contentWindow!.focus();
+    iframe.contentWindow!.print();
+    setTimeout(() => document.body.removeChild(iframe), 1000);
+  }, 300);
+}
+
+// ============================================================
+// FUNGSI UTAMA — auto-detect HP vs Laptop
+// ============================================================
 export async function printReceipt(
   data: PrintData,
   onStatus?: (msg: string) => void
 ): Promise<void> {
-  // Cek Web Bluetooth support
-  if (typeof navigator === 'undefined' || !('bluetooth' in navigator)) {
-    onStatus?.('Browser tidak support Bluetooth, gunakan Chrome Android');
+  const isMobile = /Android|iPhone|iPad/i.test(navigator.userAgent);
+  const hasBluetooth = typeof navigator !== 'undefined' && 'bluetooth' in navigator;
+
+  // HP Android → pakai Bluetooth
+  if (isMobile && hasBluetooth) {
+    try {
+      onStatus?.('Pilih printer di popup...');
+      const char = await getCharacteristic();
+      onStatus?.('Mengirim ke printer...');
+      await writeInChunks(char, buildReceipt(data));
+      onStatus?.('Print berhasil! ✅');
+    } catch (err: unknown) {
+      const e = err as { name?: string; message?: string };
+      if (e?.name === 'AbortError') { onStatus?.('Dibatalkan.'); return; }
+      onStatus?.(`Gagal: ${e?.message ?? 'Unknown error'} ❌`);
+    }
     return;
   }
 
-  const receipt = buildReceipt(data);
-
-  try {
-    onStatus?.('Pilih printer di popup...');
-    const char = await getCharacteristic();
-    onStatus?.('Mengirim ke printer...');
-    await writeInChunks(char, receipt);
-    onStatus?.('Print berhasil! ✅');
-  } catch (err: unknown) {
-    const e = err as { name?: string; message?: string };
-    if (e?.name === 'AbortError') {
-      onStatus?.('Dibatalkan.');
-      return;
-    }
-    // Tampilkan pesan error yang jelas, jangan fallback window.print()
-    onStatus?.(`Gagal: ${e?.message ?? 'Unknown error'} ❌`);
-    console.error('Bluetooth print error:', err);
-  }
+  // Laptop → pakai iframe print (USB printer via Windows driver)
+  onStatus?.('Membuka dialog print...');
+  printViaHTML(data);
+  setTimeout(() => onStatus?.(null as unknown as string), 2000);
 }
