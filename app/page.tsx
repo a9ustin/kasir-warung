@@ -75,6 +75,7 @@ function VariantModal({ menu, groups, options, menuGroupIds, onAdd, onClose }: {
   const [orderType, setOrderType] = useState<'Dine In' | 'Take Away'>('Take Away');
   const [selected, setSelected] = useState<SelectedVariant[]>([]);
   const [note, setNote] = useState('');
+  const [qty, setQty] = useState(1);
 
   const activeGroups = groups.filter(g => menuGroupIds.includes(g.id));
 
@@ -98,7 +99,7 @@ function VariantModal({ menu, groups, options, menuGroupIds, onAdd, onClose }: {
     onAdd({
       cartKey: makeCartKey(menu.id, orderType, selected),
       id: menu.id, name: menu.name, price: menu.price, category: menu.category,
-      qty: 1, note, isDone: false, orderType, selectedVariants: selected, finalPrice,
+      qty, note, isDone: false, orderType, selectedVariants: selected, finalPrice,
     });
     onClose();
   };
@@ -168,12 +169,23 @@ function VariantModal({ menu, groups, options, menuGroupIds, onAdd, onClose }: {
 
         {/* CTA */}
         <div className="px-5 py-4 pb-8">
-          <button onClick={handleAdd} disabled={!allRequiredFilled}
-            className={`w-full py-4 rounded-2xl font-black text-base transition-all ${allRequiredFilled ? 'bg-orange-600 text-white shadow-lg active:scale-95' : 'bg-gray-200 text-gray-400 cursor-not-allowed'}`}>
-            {allRequiredFilled
-              ? `Masukkan ke Keranjang · Rp ${finalPrice.toLocaleString('id-ID')}`
-              : `Pilih ${missingRequired.join(', ')} dulu`}
-          </button>
+          <div className="flex gap-3 items-center">
+            {/* Qty Selector */}
+            <div className="flex items-center gap-2 bg-gray-100 rounded-2xl px-2 py-2 shrink-0">
+              <button onClick={() => setQty(q => Math.max(1, q - 1))}
+                className="w-8 h-8 rounded-xl bg-white shadow-sm font-black text-gray-600 hover:text-orange-600 flex items-center justify-center text-lg transition-colors">−</button>
+              <span className="w-6 text-center font-black text-base">{qty}</span>
+              <button onClick={() => setQty(q => q + 1)}
+                className="w-8 h-8 rounded-xl bg-orange-600 text-white font-black flex items-center justify-center text-lg shadow-sm hover:bg-orange-700 transition-colors">+</button>
+            </div>
+            {/* Add to Cart Button */}
+            <button onClick={handleAdd} disabled={!allRequiredFilled}
+              className={`flex-1 py-4 rounded-2xl font-black text-sm transition-all ${allRequiredFilled ? 'bg-orange-600 text-white shadow-lg active:scale-95' : 'bg-gray-200 text-gray-400 cursor-not-allowed'}`}>
+              {allRequiredFilled
+                ? `Keranjang · Rp ${(finalPrice * qty).toLocaleString('id-ID')}`
+                : `Pilih ${missingRequired.join(', ')} dulu`}
+            </button>
+          </div>
         </div>
       </div>
     </div>
