@@ -259,12 +259,7 @@ export default function KasirWarung() {
 
   // ─── CART ──────────────────────────────────────────────────
   const handleMenuClick = (menu: MenuItem) => {
-    const groupIds = menuVariantGroups.filter(mvg => mvg.menu_id === menu.id).map(mvg => mvg.group_id);
-    if (groupIds.length > 0) { setVariantModal(menu); return; }
-    const key = makeCartKey(menu.id, 'Take Away', []);
-    const idx = cart.findIndex(c => c.cartKey === key);
-    if (idx !== -1) { const nc = [...cart]; nc[idx].qty = Number(nc[idx].qty) + 1; setCart(nc); }
-    else setCart([...cart, { cartKey: key, id: menu.id, name: menu.name, price: menu.price, category: menu.category, qty: 1, note: '', isDone: false, orderType: 'Take Away', selectedVariants: [], finalPrice: menu.price }]);
+    setVariantModal(menu);
   };
 
   const addToCartFromModal = (item: CartItem) => {
@@ -469,21 +464,19 @@ export default function KasirWarung() {
                       className={`px-4 py-1.5 rounded-full font-bold whitespace-nowrap border-2 text-sm transition-all ${activeCategory === c ? 'bg-orange-600 border-orange-600 text-white' : 'bg-white border-gray-200 text-gray-600'}`}>{c}</button>
                   ))}
                 </div>
-                <div className="grid grid-cols-2 sm:grid-cols-3 xl:grid-cols-4 gap-3">
+                <div className="grid grid-cols-3 sm:grid-cols-4 xl:grid-cols-5 gap-2">
                   {filteredMenu.map(m => {
                     const hasVariants = menuVariantGroups.some(mvg => mvg.menu_id === m.id);
                     return (
                       <button key={m.id} onClick={() => handleMenuClick(m)}
-                        className="bg-white p-4 rounded-2xl border-2 border-gray-100 text-left hover:border-orange-400 active:scale-95 transition-all group relative flex flex-col justify-between min-h-[110px] shadow-sm">
+                        className="bg-white p-3 rounded-2xl border-2 border-gray-100 text-left hover:border-orange-400 active:scale-95 transition-all group relative flex flex-col justify-between shadow-sm">
                         <div>
-                          <span className="text-[10px] font-bold bg-orange-100 text-orange-600 px-2 py-0.5 rounded-full">{m.category}</span>
-                          <p className="font-bold text-sm mt-2 leading-snug">{m.name}</p>
+                          <p className="font-bold text-xs leading-snug text-gray-800">{m.name}</p>
                         </div>
-                        <div className="flex items-center justify-between mt-2">
-                          <p className="font-black text-sm">Rp {m.price.toLocaleString('id-ID')}</p>
-                          {hasVariants && <span className="text-[9px] font-bold bg-blue-100 text-blue-600 px-1.5 py-0.5 rounded-full">varian</span>}
+                        <div className="flex items-center justify-between mt-2 gap-1">
+                          <p className="font-black text-xs text-orange-600">Rp {m.price.toLocaleString('id-ID')}</p>
+                          {hasVariants && <span className="text-[8px] font-bold bg-blue-100 text-blue-500 px-1 py-0.5 rounded-full shrink-0">var</span>}
                         </div>
-                        <div className="absolute bottom-3 right-3 bg-orange-600 text-white w-6 h-6 rounded-full flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity text-sm font-black">+</div>
                       </button>
                     );
                   })}
