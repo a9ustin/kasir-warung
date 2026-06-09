@@ -486,7 +486,7 @@ export default function KasirWarung() {
                           <p className="font-bold text-xs leading-snug text-gray-800">{m.name}</p>
                         </div>
                         <div className="flex items-center justify-between mt-2 gap-1">
-                          <p className="font-black text-xs text-orange-600">Rp {m.price.toLocaleString('id-ID')}</p>
+                          <p className="font-bold text-xs text-orange-600 whitespace-nowrap">Rp {m.price.toLocaleString('id-ID')}</p>
                           {hasVariants && <span className="text-[8px] font-bold bg-blue-100 text-blue-500 px-1 py-0.5 rounded-full shrink-0">var</span>}
                         </div>
                       </button>

@@ -89,7 +89,7 @@ export function buildReceipt(data: PrintData): Uint8Array {
 
   for (const item of data.items) {
     const qty = Number(item.qty) || 1;
-    const label = item.name + (item.orderType === 'Take Away' ? ' (Bks)' : '');
+    const label = item.name;
     const lines = wrapText(label, COL - 2);
     add(cmd.BOLD_ON);
     add(lines[0] + '\n');
@@ -199,7 +199,7 @@ function printViaHTML(data: PrintData): void {
   const itemsHTML = data.items.map(item => {
     const qty = Number(item.qty) || 1;
     const subtotal = (qty * item.price).toLocaleString('id-ID');
-    const label = item.name + (item.orderType === 'Take Away' ? ' (Bks)' : '');
+    const label = item.name;
     const noteHTML = item.note ? `<div class="note">*${item.note}*</div>` : '';
     return `
       <div class="item">
