@@ -1,296 +1,454 @@
 'use client';
-import { useState, useEffect } from 'react';
+import React, { useState, useEffect } from 'react';
 import { supabase } from './supabase';
-import { printReceipt, type PrintData } from './escpos-print'; // PATCH 1: Import fungsi print baru
+import { printReceipt, type PrintData } from './escpos-print';
 
-const THEME = {
-  bg: 'bg-[#FAF9F6]',         
-  primary: 'orange-600',       
-  primaryHover: 'orange-700',
-  secondary: 'text-gray-900',  
-  cardBg: 'bg-white',
-  cardBorder: 'border-gray-100',
-  cardShadow: 'shadow-[0_8px_30px_rgb(0,0,0,0.04)]', 
-  activeTab: 'bg-orange-600 text-white',
-  inactiveTab: 'bg-gray-100 text-gray-700 hover:bg-gray-200'
-};
-
+// ─── TYPES ───────────────────────────────────────────────────
 type MenuItem = { id: string; name: string; price: number; category: string };
-type CartItem = MenuItem & { qty: number | ''; note: string; isDone: boolean; isCustom?: boolean; orderType: 'Dine In' | 'Take Away' };
-type Order = { 
-  id: string; customer_name: string; order_note: string; items: CartItem[]; total: number; status: 'To Do' | 'In Progress' | 'Done'; payment_method: 'Belum Bayar' | 'Cash' | 'QRIS Mandiri' | 'QRIS Gopay'; created_at: string;
+
+type VariantGroup = {
+  id: string;
+  name: string;
+  is_required: boolean;
 };
+
+type VariantOption = {
+  id: string;
+  group_id: string;
+  option_name: string;
+  price_add: number;
+};
+
+type MenuVariantGroup = {
+  id: string;
+  menu_id: string;
+  group_id: string;
+};
+
+type SelectedVariant = { group_id: string; group_name: string; option_name: string; price_add: number };
+
+type CartItem = {
+  cartKey: string;
+  id: string;
+  name: string;
+  price: number;
+  category: string;
+  qty: number | '';
+  note: string;
+  isDone: boolean;
+  isCustom?: boolean;
+  orderType: 'Dine In' | 'Take Away';
+  selectedVariants: SelectedVariant[];
+  finalPrice: number;
+};
+
+type Order = {
+  id: string;
+  customer_name: string;
+  order_note: string;
+  items: CartItem[];
+  total: number;
+  status: 'To Do' | 'In Progress' | 'Done';
+  payment_method: 'Belum Bayar' | 'Cash' | 'QRIS Mandiri' | 'QRIS Gopay';
+  created_at: string;
+};
+
+// ─── HELPERS ─────────────────────────────────────────────────
+function makeCartKey(menuId: string, orderType: string, variants: SelectedVariant[]): string {
+  const vKey = variants.map(v => `${v.group_id}:${v.option_name}`).sort().join('|');
+  return `${menuId}__${orderType}__${vKey}`;
+}
 
 const ModernInput = (props: React.InputHTMLAttributes<HTMLInputElement>) => (
-  <input {...props} className={`w-full bg-gray-50 border-gray-200 border-2 ${THEME.secondary} text-base p-3.5 rounded-2xl outline-none focus:border-${THEME.primary} transition-colors placeholder:text-gray-400 ${props.className}`} />
+  <input {...props} className={`w-full bg-gray-50 border-gray-200 border-2 text-gray-900 text-base p-3.5 rounded-2xl outline-none focus:border-orange-600 transition-colors placeholder:text-gray-400 ${props.className ?? ''}`} />
 );
 
+// ─── VARIANT MODAL ───────────────────────────────────────────
+function VariantModal({ menu, groups, options, menuGroupIds, onAdd, onClose }: {
+  menu: MenuItem;
+  groups: VariantGroup[];
+  options: VariantOption[];
+  menuGroupIds: string[];
+  onAdd: (item: CartItem) => void;
+  onClose: () => void;
+}) {
+  const [orderType, setOrderType] = useState<'Dine In' | 'Take Away'>('Take Away');
+  const [selected, setSelected] = useState<SelectedVariant[]>([]);
+  const [note, setNote] = useState('');
+
+  const activeGroups = groups.filter(g => menuGroupIds.includes(g.id));
+
+  const toggle = (group: VariantGroup, opt: VariantOption) => {
+    const exists = selected.find(s => s.group_id === group.id && s.option_name === opt.option_name);
+    if (exists) {
+      setSelected(selected.filter(s => !(s.group_id === group.id && s.option_name === opt.option_name)));
+    } else {
+      setSelected([...selected, { group_id: group.id, group_name: group.name, option_name: opt.option_name, price_add: opt.price_add }]);
+    }
+  };
+
+  const extraTotal = selected.reduce((s, v) => s + v.price_add, 0);
+  const finalPrice = menu.price + extraTotal;
+  const requiredGroups = activeGroups.filter(g => g.is_required);
+  const allRequiredFilled = requiredGroups.every(g => selected.some(s => s.group_id === g.id));
+  const missingRequired = requiredGroups.filter(g => !selected.some(s => s.group_id === g.id)).map(g => g.name);
+
+  const handleAdd = () => {
+    if (!allRequiredFilled) return;
+    onAdd({
+      cartKey: makeCartKey(menu.id, orderType, selected),
+      id: menu.id, name: menu.name, price: menu.price, category: menu.category,
+      qty: 1, note, isDone: false, orderType, selectedVariants: selected, finalPrice,
+    });
+    onClose();
+  };
+
+  return (
+    <div className="fixed inset-0 z-[80] bg-black/50 flex items-end justify-center" onClick={onClose}>
+      <div className="bg-white w-full max-w-lg rounded-t-3xl max-h-[90vh] overflow-y-auto" onClick={e => e.stopPropagation()}>
+        <div className="flex justify-center pt-3 pb-1"><div className="w-10 h-1 bg-gray-300 rounded-full" /></div>
+        <div className="px-5 pt-2 pb-4 border-b border-gray-100">
+          <div className="flex justify-between items-start">
+            <div>
+              <h2 className="font-black text-xl text-gray-900">{menu.name}</h2>
+              <p className="text-orange-600 font-bold text-lg mt-0.5">Rp {menu.price.toLocaleString('id-ID')}</p>
+            </div>
+            <button onClick={onClose} className="text-gray-400 text-3xl leading-none">×</button>
+          </div>
+        </div>
+
+        {/* Order Type */}
+        <div className="px-5 py-4 border-b border-gray-100">
+          <p className="text-xs font-black text-gray-500 uppercase tracking-wider mb-3">Jenis Pesanan</p>
+          <div className="flex gap-3">
+            {(['Take Away', 'Dine In'] as const).map(t => (
+              <button key={t} onClick={() => setOrderType(t)}
+                className={`flex-1 py-2.5 rounded-2xl font-bold text-sm border-2 transition-all ${orderType === t ? 'bg-orange-600 border-orange-600 text-white' : 'border-gray-200 text-gray-600'}`}>
+                {t === 'Take Away' ? '🛍 Bungkus' : '🍽 Makan Sini'}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        {/* Variant Groups */}
+        {activeGroups.map(group => (
+          <div key={group.id} className="px-5 py-4 border-b border-gray-100">
+            <div className="flex items-center gap-2 mb-3">
+              <p className="text-xs font-black text-gray-700 uppercase tracking-wider">{group.name}</p>
+              {group.is_required && <span className="text-[10px] font-bold bg-red-100 text-red-600 px-2 py-0.5 rounded-full">Wajib</span>}
+            </div>
+            <div className="flex flex-col gap-2">
+              {options.filter(o => o.group_id === group.id).map(opt => {
+                const isSelected = selected.some(s => s.group_id === group.id && s.option_name === opt.option_name);
+                return (
+                  <button key={opt.id} onClick={() => toggle(group, opt)}
+                    className={`flex justify-between items-center p-3.5 rounded-2xl border-2 transition-all text-left ${isSelected ? 'border-orange-600 bg-orange-50' : 'border-gray-100 bg-gray-50'}`}>
+                    <div className="flex items-center gap-3">
+                      <div className={`w-5 h-5 rounded-md border-2 flex items-center justify-center shrink-0 ${isSelected ? 'bg-orange-600 border-orange-600' : 'border-gray-300 bg-white'}`}>
+                        {isSelected && <span className="text-white text-xs font-black">✓</span>}
+                      </div>
+                      <span className={`font-semibold text-sm ${isSelected ? 'text-orange-700' : 'text-gray-700'}`}>{opt.option_name}</span>
+                    </div>
+                    <span className={`text-xs font-bold ${opt.price_add > 0 ? 'text-orange-600' : 'text-gray-400'}`}>
+                      {opt.price_add > 0 ? `+Rp ${opt.price_add.toLocaleString('id-ID')}` : 'Gratis'}
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+        ))}
+
+        {/* Note */}
+        <div className="px-5 py-4 border-b border-gray-100">
+          <p className="text-xs font-black text-gray-500 uppercase tracking-wider mb-2">Catatan (Opsional)</p>
+          <input placeholder="Contoh: jangan pedas..." value={note} onChange={e => setNote(e.target.value)}
+            className="w-full bg-gray-50 border-2 border-gray-200 p-3 rounded-2xl text-sm outline-none focus:border-orange-600" />
+        </div>
+
+        {/* CTA */}
+        <div className="px-5 py-4 pb-8">
+          <button onClick={handleAdd} disabled={!allRequiredFilled}
+            className={`w-full py-4 rounded-2xl font-black text-base transition-all ${allRequiredFilled ? 'bg-orange-600 text-white shadow-lg active:scale-95' : 'bg-gray-200 text-gray-400 cursor-not-allowed'}`}>
+            {allRequiredFilled
+              ? `Masukkan ke Keranjang · Rp ${finalPrice.toLocaleString('id-ID')}`
+              : `Pilih ${missingRequired.join(', ')} dulu`}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ─── MAIN ────────────────────────────────────────────────────
 export default function KasirWarung() {
   const [activeTab, setActiveTab] = useState<'KASIR' | 'TRACKER' | 'REKAP' | 'MASTER'>('KASIR');
-  const [menuList, setMenuList] = useState<MenuItem[]>([]);
-  const [orders, setOrders] = useState<Order[]>([]);
-  const [searchQuery, setSearchQuery] = useState('');
-  const [activeCategory, setActiveCategory] = useState('All');
-  const [recapFilter, setRecapFilter] = useState<'Hari Ini' | 'Minggu Ini' | 'Semua'>('Hari Ini');
-  
-  // State Master Menu
-  const [masterSearch, setMasterSearch] = useState('');
-  const [masterCategoryFilter, setMasterCategoryFilter] = useState('All');
-  const [editingMenuId, setEditingMenuId] = useState<string | null>(null);
-  const [editPrice, setEditPrice] = useState<string>('');
-  const [editName, setEditName] = useState<string>('');
-  const [sortConfig, setSortConfig] = useState<{key: keyof MenuItem, direction: 'asc' | 'desc'}>({key: 'category', direction: 'asc'});
+  const [masterSubTab, setMasterSubTab] = useState<'MENU' | 'VARIAN'>('MENU');
 
-  // State Kasir & Cart
+  // Data
+  const [menuList, setMenuList] = useState<MenuItem[]>([]);
+  const [variantGroups, setVariantGroups] = useState<VariantGroup[]>([]);
+  const [variantOptions, setVariantOptions] = useState<VariantOption[]>([]);
+  const [menuVariantGroups, setMenuVariantGroups] = useState<MenuVariantGroup[]>([]);
+  const [orders, setOrders] = useState<Order[]>([]);
+
+  // Kasir
   const [cart, setCart] = useState<CartItem[]>([]);
   const [customerName, setCustomerName] = useState('');
   const [orderNote, setOrderNote] = useState('');
-  const [paymentMethod, setPaymentMethod] = useState<'Belum Bayar' | 'Cash' | 'QRIS Mandiri' | 'QRIS Gopay'>('Belum Bayar');
+  const [paymentMethod, setPaymentMethod] = useState<Order['payment_method']>('Belum Bayar');
   const [editingOrderId, setEditingOrderId] = useState<string | null>(null);
   const [isMobileCartOpen, setIsMobileCartOpen] = useState(false);
+  const [cashGiven, setCashGiven] = useState('');
+  const [variantModal, setVariantModal] = useState<MenuItem | null>(null);
+  const [customName, setCustomName] = useState('');
+  const [customPrice, setCustomPrice] = useState('');
+  const [searchQuery, setSearchQuery] = useState('');
+  const [activeCategory, setActiveCategory] = useState('All');
 
-  // State Kalkulator Cash
-  const [cashGiven, setCashGiven] = useState<string>('');
+  // Tracker
   const [trackerCashGiven, setTrackerCashGiven] = useState<Record<string, string>>({});
 
-  // PATCH 2: State khusus untuk Web Bluetooth Print
-  const [printStatus, setPrintStatus] = useState<string | null>(null);
+  // Rekap
+  const [recapFilter, setRecapFilter] = useState<'Hari Ini' | 'Minggu Ini' | 'Semua'>('Hari Ini');
 
-  // Custom Modal State
-  const [dialog, setDialog] = useState<{isOpen: boolean; message: string; onConfirm: () => void}>({isOpen: false, message: '', onConfirm: () => {}});
-
+  // Master Menu
+  const [masterSearch, setMasterSearch] = useState('');
+  const [masterCategoryFilter, setMasterCategoryFilter] = useState('All');
+  const [editingMenuId, setEditingMenuId] = useState<string | null>(null);
+  const [editName, setEditName] = useState('');
+  const [editPrice, setEditPrice] = useState('');
   const [newMenuName, setNewMenuName] = useState('');
   const [newMenuPrice, setNewMenuPrice] = useState('');
   const [newMenuCategory, setNewMenuCategory] = useState('Nasi');
-  const [customName, setCustomName] = useState('');
-  const [customPrice, setCustomPrice] = useState('');
+  const [sortConfig, setSortConfig] = useState<{ key: keyof MenuItem; direction: 'asc' | 'desc' }>({ key: 'category', direction: 'asc' });
+
+  // Master Varian
+  const [newGroupName, setNewGroupName] = useState('');
+  const [newGroupRequired, setNewGroupRequired] = useState(false);
+  const [expandedGroupId, setExpandedGroupId] = useState<string | null>(null);
+  const [newOptName, setNewOptName] = useState('');
+  const [newOptPrice, setNewOptPrice] = useState('');
+  const [expandedMenuVariantId, setExpandedMenuVariantId] = useState<string | null>(null);
+
+  // UI
+  const [printStatus, setPrintStatus] = useState<string | null>(null);
   const [toastMessage, setToastMessage] = useState<string | null>(null);
+  const [dialog, setDialog] = useState<{ isOpen: boolean; message: string; onConfirm: () => void }>({ isOpen: false, message: '', onConfirm: () => {} });
 
-  // --- FETCH & REALTIME DENGAN DEBOUNCE ---
+  // ─── FETCH ─────────────────────────────────────────────────
   useEffect(() => {
-    fetchMenus(); 
-    fetchOrders();
-    let debounceTimer: NodeJS.Timeout;
-
-    const channel = supabase.channel('realtime-orders').on('postgres_changes', { event: '*', schema: 'public', table: 'orders' }, () => {
-      clearTimeout(debounceTimer);
-      debounceTimer = setTimeout(() => {
-        fetchOrders();
-      }, 500);
+    fetchAll();
+    let t: ReturnType<typeof setTimeout>;
+    const ch = supabase.channel('rt').on('postgres_changes', { event: '*', schema: 'public', table: 'orders' }, () => {
+      clearTimeout(t); t = setTimeout(fetchOrders, 500);
     }).subscribe();
-
-    return () => { 
-      supabase.removeChannel(channel); 
-      clearTimeout(debounceTimer);
-    };
+    return () => { supabase.removeChannel(ch); clearTimeout(t); };
   }, []);
 
-  // PATCH 3: useEffect bawaan window.print() dihapus
-
-  const showToast = (message: string) => { setToastMessage(message); setTimeout(() => setToastMessage(null), 1500); };
-  
-  const confirmAction = (message: string, action: () => void) => {
-    setDialog({ isOpen: true, message, onConfirm: () => { action(); setDialog(prev => ({...prev, isOpen: false})); } });
-  };
-
+  const fetchAll = () => { fetchMenus(); fetchVariantGroups(); fetchVariantOptions(); fetchMenuVariantGroups(); fetchOrders(); };
   const fetchMenus = async () => { const { data } = await supabase.from('menus').select('*'); if (data) setMenuList(data); };
+  const fetchVariantGroups = async () => { const { data } = await supabase.from('variant_groups').select('*').order('created_at'); if (data) setVariantGroups(data); };
+  const fetchVariantOptions = async () => { const { data } = await supabase.from('variant_options').select('*').order('created_at'); if (data) setVariantOptions(data); };
+  const fetchMenuVariantGroups = async () => { const { data } = await supabase.from('menu_variant_groups').select('*'); if (data) setMenuVariantGroups(data); };
   const fetchOrders = async () => { const { data } = await supabase.from('orders').select('*').order('created_at', { ascending: false }); if (data) setOrders(data); };
 
-  const copyToClipboard = (order: Order) => {
-    const itemText = order.items.map(it => {
-      const noteText = it.note ? ` (${it.note})` : '';
-      return `- ${it.qty}x ${it.name}${noteText} (Rp ${(Number(it.qty) * it.price).toLocaleString('id-ID')})`;
-    }).join('\n');
-    
-    const text = `${itemText}\n\n*Total: Rp ${order.total.toLocaleString('id-ID')}*\n\n*Terima Kasih!* 🙏`;
-    navigator.clipboard.writeText(text); 
-    showToast('Pesanan disalin!');
+  // ─── UI HELPERS ────────────────────────────────────────────
+  const showToast = (msg: string) => { setToastMessage(msg); setTimeout(() => setToastMessage(null), 1800); };
+  const confirmAction = (msg: string, action: () => void) => setDialog({ isOpen: true, message: msg, onConfirm: () => { action(); setDialog(p => ({ ...p, isOpen: false })); } });
+
+  // ─── CART ──────────────────────────────────────────────────
+  const handleMenuClick = (menu: MenuItem) => {
+    const groupIds = menuVariantGroups.filter(mvg => mvg.menu_id === menu.id).map(mvg => mvg.group_id);
+    if (groupIds.length > 0) { setVariantModal(menu); return; }
+    const key = makeCartKey(menu.id, 'Take Away', []);
+    const idx = cart.findIndex(c => c.cartKey === key);
+    if (idx !== -1) { const nc = [...cart]; nc[idx].qty = Number(nc[idx].qty) + 1; setCart(nc); }
+    else setCart([...cart, { cartKey: key, id: menu.id, name: menu.name, price: menu.price, category: menu.category, qty: 1, note: '', isDone: false, orderType: 'Take Away', selectedVariants: [], finalPrice: menu.price }]);
   };
 
-  // PATCH 4: Fungsi Print menggunakan escpos-print
-  const handlePrintCart = async () => {
-    if (!customerName || cart.length === 0) return showToast('Keranjang masih kosong!');
-    const data: PrintData = {
-      created_at: new Date().toISOString(),
-      customer_name: customerName,
-      payment_method: paymentMethod,
-      order_note: orderNote,
-      items: cart.map(c => ({ ...c, qty: Number(c.qty) || 1 })),
-      total: totalCart,
-      cash_given: parseInt(cashGiven) || 0,
-    };
-    await printReceipt(data, (msg) => {
-      setPrintStatus(msg);
-      setTimeout(() => setPrintStatus(null), 3000);
-    });
+  const addToCartFromModal = (item: CartItem) => {
+    const idx = cart.findIndex(c => c.cartKey === item.cartKey);
+    if (idx !== -1) { const nc = [...cart]; nc[idx].qty = Number(nc[idx].qty) + 1; setCart(nc); }
+    else setCart([...cart, item]);
+    showToast('Masuk keranjang! 🛒');
   };
 
-  const handlePrintOrder = async (order: Order, overrideCash?: string) => {
-    const data: PrintData = {
-      ...order,
-      cash_given: parseInt(overrideCash || '0'),
-    };
-    await printReceipt(data, (msg) => {
-      setPrintStatus(msg);
-      setTimeout(() => setPrintStatus(null), 3000);
-    });
-  };
-
-  const handleUpdateMenu = async (id: string) => {
-    if (!editName || !editPrice) return showToast('Nama/harga kosong! ⚠️');
-    const { error } = await supabase.from('menus').update({ name: editName, price: parseInt(editPrice) || 0 }).eq('id', id);
-    if (!error) { setEditingMenuId(null); fetchMenus(); showToast('Menu diupdate! ✅'); } else showToast('Gagal update ❌');
-  };
-
-  const handleAddMenuToMaster = async () => {
-    if (!newMenuName || !newMenuPrice) return showToast('Isi data lengkap!');
-    const newMenu = { name: newMenuName, price: parseInt(newMenuPrice) || 0, category: newMenuCategory };
-    const { data, error } = await supabase.from('menus').insert([newMenu]).select();
-    if (!error && data) { setMenuList([...menuList, data[0]]); setNewMenuName(''); setNewMenuPrice(''); showToast('Menu ditambah! 💾'); }
-  };
-
-  const handleDeleteMenuFromMaster = (id: string) => {
-    confirmAction('Yakin ingin menghapus menu ini dari master?', async () => {
-      const { error } = await supabase.from('menus').delete().eq('id', id); 
-      if (!error) { setMenuList(menuList.filter(m => m.id !== id)); showToast('Dihapus! 🗑️'); }
-    });
-  };
-
-  const requestSort = (key: keyof MenuItem) => {
-    let direction: 'asc' | 'desc' = 'asc';
-    if (sortConfig.key === key && sortConfig.direction === 'asc') direction = 'desc';
-    setSortConfig({ key, direction });
-  };
-  
-  const getSortIcon = (key: keyof MenuItem) => {
-    if (sortConfig.key !== key) return '↕️'; return sortConfig.direction === 'asc' ? '🔼' : '🔽';
-  };
-
-  const categories = ['All', ...Array.from(new Set(menuList.map(m => m.category)))];
-  const filteredMenu = menuList.filter(m => (activeCategory === 'All' || m.category === activeCategory) && m.name.toLowerCase().includes(searchQuery.toLowerCase()));
-
-  const addToCart = (item: MenuItem) => {
-    const idx = cart.findIndex(c => c.id === item.id);
-    if (idx !== -1) { const newCart = [...cart]; newCart[idx].qty = Number(newCart[idx].qty) + 1; setCart(newCart); }
-    else { setCart([...cart, { ...item, qty: 1, note: '', isDone: false, orderType: 'Take Away' }]); }
-  };
-
-  const addCustomItemToCart = () => {
+  const addCustomItem = () => {
     if (!customName || !customPrice) return showToast('Isi data dadakan!');
-    setCart([...cart, { id: crypto.randomUUID(), name: customName, price: parseInt(customPrice) || 0, category: 'Dadakan', qty: 1, note: '', isDone: false, isCustom: true, orderType: 'Take Away' }]);
+    const key = `custom-${crypto.randomUUID()}`;
+    setCart([...cart, { cartKey: key, id: key, name: customName, price: parseInt(customPrice) || 0, category: 'Dadakan', qty: 1, note: '', isDone: false, isCustom: true, orderType: 'Take Away', selectedVariants: [], finalPrice: parseInt(customPrice) || 0 }]);
     setCustomName(''); setCustomPrice(''); showToast('Masuk keranjang!');
   };
 
-  const updateQtyDirect = (idx: number, val: string) => {
-    const newCart = [...cart]; 
-    newCart[idx].qty = val === '' ? '' : Number(val);
-    setCart(newCart);
-  };
-  
-  const handleQtyBlur = (idx: number) => {
-    const newCart = [...cart]; if (newCart[idx].qty === '' || Number(newCart[idx].qty) <= 0) newCart[idx].qty = 1;
-    setCart(newCart);
-  };
-  
   const updateQty = (idx: number, delta: number) => {
-    const newCart = [...cart]; newCart[idx].qty = (Number(newCart[idx].qty) || 0) + delta;
-    if (Number(newCart[idx].qty) <= 0) setCart(newCart.filter((_, i) => i !== idx)); else setCart(newCart);
+    const nc = [...cart]; nc[idx].qty = (Number(nc[idx].qty) || 0) + delta;
+    if (Number(nc[idx].qty) <= 0) setCart(nc.filter((_, i) => i !== idx)); else setCart(nc);
   };
-
-  const totalCart = cart.reduce((s, i) => s + (i.price * (Number(i.qty) || 0)), 0);
-
+  const updateQtyDirect = (idx: number, val: string) => { const nc = [...cart]; nc[idx].qty = val === '' ? '' : Number(val); setCart(nc); };
+  const handleQtyBlur = (idx: number) => { const nc = [...cart]; if (!nc[idx].qty || Number(nc[idx].qty) <= 0) nc[idx].qty = 1; setCart(nc); };
+  const totalCart = cart.reduce((s, i) => s + (i.finalPrice * (Number(i.qty) || 0)), 0);
   const clearKasir = () => { setCart([]); setCustomerName(''); setOrderNote(''); setPaymentMethod('Belum Bayar'); setCashGiven(''); setEditingOrderId(null); setIsMobileCartOpen(false); };
 
   const submitOrder = async () => {
     if (!customerName || cart.length === 0) return showToast('Data belum lengkap!');
-    const cleanCart = cart.map(c => ({...c, qty: Number(c.qty) || 1}));
+    const cleanCart = cart.map(c => ({ ...c, qty: Number(c.qty) || 1 }));
     const orderData = { customer_name: customerName, order_note: orderNote, items: cleanCart, total: totalCart, status: 'To Do', payment_method: paymentMethod };
     const { error } = editingOrderId ? await supabase.from('orders').update(orderData).eq('id', editingOrderId) : await supabase.from('orders').insert([orderData]);
     if (!error) { clearKasir(); setActiveTab('TRACKER'); showToast('Dikirim ke dapur! 🍳'); } else showToast('Gagal proses!');
   };
 
-  const updateStatus = async (id: string, s: string) => { 
-    setOrders(prev => prev.map(o => o.id === id ? { ...o, status: s as any } : o)); 
-    await supabase.from('orders').update({ status: s }).eq('id', id); 
+  // ─── PRINT ─────────────────────────────────────────────────
+  const buildPrintItems = (items: CartItem[]) => items.map(c => ({
+    ...c, qty: Number(c.qty) || 1, price: c.finalPrice ?? c.price,
+    name: c.selectedVariants?.length > 0 ? `${c.name} (${c.selectedVariants.map(v => v.option_name).join(', ')})` : c.name,
+  }));
+
+  const handlePrintCart = async () => {
+    if (!customerName || cart.length === 0) return showToast('Keranjang kosong!');
+    await printReceipt({ created_at: new Date().toISOString(), customer_name: customerName, payment_method: paymentMethod, order_note: orderNote, items: buildPrintItems(cart), total: totalCart, cash_given: parseInt(cashGiven) || 0 },
+      msg => { setPrintStatus(msg); setTimeout(() => setPrintStatus(null), 3000); });
   };
-  
-  const updatePayment = async (id: string, p: string) => { 
-    setOrders(prev => prev.map(o => o.id === id ? { ...o, payment_method: p as any } : o));
-    await supabase.from('orders').update({ payment_method: p }).eq('id', id); 
+
+  const handlePrintOrder = async (order: Order, overrideCash?: string) => {
+    await printReceipt({ ...order, items: buildPrintItems(order.items), cash_given: parseInt(overrideCash || '0') },
+      msg => { setPrintStatus(msg); setTimeout(() => setPrintStatus(null), 3000); });
   };
-  
-  const deleteOrder = (id: string) => { 
-    confirmAction('Batalkan pesanan ini secara permanen?', async () => {
-      setOrders(prev => prev.filter(o => o.id !== id)); 
-      await supabase.from('orders').delete().eq('id', id); 
-      showToast('Dibatalkan ❌'); 
-    });
+
+  // ─── MASTER MENU ───────────────────────────────────────────
+  const handleAddMenu = async () => {
+    if (!newMenuName || !newMenuPrice) return showToast('Isi data lengkap!');
+    const { data, error } = await supabase.from('menus').insert([{ name: newMenuName, price: parseInt(newMenuPrice) || 0, category: newMenuCategory }]).select();
+    if (!error && data) { setMenuList([...menuList, data[0]]); setNewMenuName(''); setNewMenuPrice(''); showToast('Menu ditambah! 💾'); }
   };
-  
-  const toggleItemDone = async (orderId: string, itemIndex: number) => {
-    const order = orders.find(o => o.id === orderId);
-    if (!order) return;
 
-    const newItems = order.items.map((item, i) =>
-      i === itemIndex ? { ...item, isDone: !item.isDone } : item
-    );
+  const handleUpdateMenu = async (id: string) => {
+    if (!editName || !editPrice) return showToast('Nama/harga kosong!');
+    await supabase.from('menus').update({ name: editName, price: parseInt(editPrice) || 0 }).eq('id', id);
+    setEditingMenuId(null); fetchMenus(); showToast('Diupdate! ✅');
+  };
 
-    setOrders(prev => prev.map(o =>
-      o.id === orderId ? { ...o, items: newItems } : o
-    ));
+  const handleDeleteMenu = (id: string) => confirmAction('Hapus menu ini?', async () => {
+    await supabase.from('menus').delete().eq('id', id);
+    setMenuList(menuList.filter(m => m.id !== id)); showToast('Dihapus! 🗑️');
+  });
 
-    const { error } = await supabase
-      .from('orders')
-      .update({ items: newItems })
-      .eq('id', orderId);
+  // ─── MASTER VARIAN ─────────────────────────────────────────
+  const handleAddGroup = async () => {
+    if (!newGroupName) return showToast('Isi nama grup!');
+    const { data, error } = await supabase.from('variant_groups').insert([{ name: newGroupName, is_required: newGroupRequired }]).select();
+    if (!error && data) { setVariantGroups([...variantGroups, data[0]]); setNewGroupName(''); setNewGroupRequired(false); showToast('Grup ditambah! ✅'); }
+  };
 
-    if (error) {
-      setOrders(prev => prev.map(o =>
-        o.id === orderId ? { ...o, items: order.items } : o
-      ));
-      showToast('Gagal update, coba lagi ❌');
+  const handleDeleteGroup = (id: string) => confirmAction('Hapus grup varian ini? Semua opsi & koneksi menu akan terhapus.', async () => {
+    await supabase.from('variant_groups').delete().eq('id', id);
+    setVariantGroups(variantGroups.filter(g => g.id !== id));
+    setVariantOptions(variantOptions.filter(o => o.group_id !== id));
+    setMenuVariantGroups(menuVariantGroups.filter(mvg => mvg.group_id !== id));
+    showToast('Dihapus! 🗑️');
+  });
+
+  const handleAddOption = async (groupId: string) => {
+    if (!newOptName) return showToast('Isi nama opsi!');
+    const { data, error } = await supabase.from('variant_options').insert([{ group_id: groupId, option_name: newOptName, price_add: parseInt(newOptPrice) || 0 }]).select();
+    if (!error && data) { setVariantOptions([...variantOptions, data[0]]); setNewOptName(''); setNewOptPrice(''); showToast('Opsi ditambah!'); }
+  };
+
+  const handleDeleteOption = async (id: string) => {
+    await supabase.from('variant_options').delete().eq('id', id);
+    setVariantOptions(variantOptions.filter(o => o.id !== id)); showToast('Dihapus!');
+  };
+
+  const toggleMenuGroupLink = async (menuId: string, groupId: string) => {
+    const existing = menuVariantGroups.find(mvg => mvg.menu_id === menuId && mvg.group_id === groupId);
+    if (existing) {
+      await supabase.from('menu_variant_groups').delete().eq('id', existing.id);
+      setMenuVariantGroups(menuVariantGroups.filter(mvg => mvg.id !== existing.id));
+    } else {
+      const { data, error } = await supabase.from('menu_variant_groups').insert([{ menu_id: menuId, group_id: groupId }]).select();
+      if (!error && data) setMenuVariantGroups([...menuVariantGroups, data[0]]);
     }
   };
 
+  // ─── TRACKER ───────────────────────────────────────────────
+  const updateStatus = async (id: string, s: string) => {
+    setOrders(prev => prev.map(o => o.id === id ? { ...o, status: s as Order['status'] } : o));
+    await supabase.from('orders').update({ status: s }).eq('id', id);
+  };
+  const updatePayment = async (id: string, p: string) => {
+    setOrders(prev => prev.map(o => o.id === id ? { ...o, payment_method: p as Order['payment_method'] } : o));
+    await supabase.from('orders').update({ payment_method: p }).eq('id', id);
+  };
+  const deleteOrder = (id: string) => confirmAction('Batalkan pesanan ini?', async () => {
+    setOrders(prev => prev.filter(o => o.id !== id));
+    await supabase.from('orders').delete().eq('id', id); showToast('Dibatalkan ❌');
+  });
+  const toggleItemDone = async (orderId: string, itemIndex: number) => {
+    const order = orders.find(o => o.id === orderId); if (!order) return;
+    const newItems = order.items.map((item, i) => i === itemIndex ? { ...item, isDone: !item.isDone } : item);
+    setOrders(prev => prev.map(o => o.id === orderId ? { ...o, items: newItems } : o));
+    const { error } = await supabase.from('orders').update({ items: newItems }).eq('id', orderId);
+    if (error) { setOrders(prev => prev.map(o => o.id === orderId ? { ...o, items: order.items } : o)); showToast('Gagal update ❌'); }
+  };
+  const copyToClipboard = (order: Order) => {
+    const text = order.items.map(it => {
+      const v = it.selectedVariants?.length > 0 ? ` (${it.selectedVariants.map(v => v.option_name).join(', ')})` : '';
+      return `- ${it.qty}x ${it.name}${v}${it.note ? ` - ${it.note}` : ''} (Rp ${(Number(it.qty) * (it.finalPrice ?? it.price)).toLocaleString('id-ID')})`;
+    }).join('\n') + `\n\n*Total: Rp ${order.total.toLocaleString('id-ID')}*\n\n*Terima Kasih!* 🙏`;
+    navigator.clipboard.writeText(text); showToast('Disalin!');
+  };
+
+  // ─── REKAP ─────────────────────────────────────────────────
   const recapOrders = orders.filter(o => {
-    const d = new Date(o.created_at); const now = new Date();
+    const d = new Date(o.created_at), now = new Date();
     if (recapFilter === 'Hari Ini') return d.toDateString() === now.toDateString();
-    if (recapFilter === 'Minggu Ini') return d >= new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
+    if (recapFilter === 'Minggu Ini') return d >= new Date(now.getTime() - 7 * 86400000);
     return true;
   });
-
   const revenue = recapOrders.filter(o => o.payment_method !== 'Belum Bayar').reduce((s, o) => s + o.total, 0);
   const cash = recapOrders.filter(o => o.payment_method === 'Cash').reduce((s, o) => s + o.total, 0);
   const qrisMandiri = recapOrders.filter(o => o.payment_method === 'QRIS Mandiri').reduce((s, o) => s + o.total, 0);
   const qrisGopay = recapOrders.filter(o => o.payment_method === 'QRIS Gopay').reduce((s, o) => s + o.total, 0);
 
+  const categories = ['All', ...Array.from(new Set(menuList.map(m => m.category)))];
+  const filteredMenu = menuList.filter(m => (activeCategory === 'All' || m.category === activeCategory) && m.name.toLowerCase().includes(searchQuery.toLowerCase()));
+
+  // ─── RENDER ────────────────────────────────────────────────
   return (
     <>
-      {/* CUSTOM DIALOG MODAL */}
+      {variantModal && (
+        <VariantModal
+          menu={variantModal}
+          groups={variantGroups}
+          options={variantOptions}
+          menuGroupIds={menuVariantGroups.filter(mvg => mvg.menu_id === variantModal.id).map(mvg => mvg.group_id)}
+          onAdd={addToCartFromModal}
+          onClose={() => setVariantModal(null)}
+        />
+      )}
+
       {dialog.isOpen && (
-        <div className="fixed inset-0 z-[100] bg-gray-900/40 backdrop-blur-sm flex items-center justify-center p-4 transition-opacity">
-          <div className="bg-white p-6 rounded-3xl shadow-2xl w-full max-w-sm border border-gray-100 animate-in fade-in zoom-in-95 duration-200">
-            <h3 className="font-black text-xl mb-2 text-gray-900">Konfirmasi</h3>
+        <div className="fixed inset-0 z-[100] bg-gray-900/40 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="bg-white p-6 rounded-3xl shadow-2xl w-full max-w-sm border border-gray-100">
+            <h3 className="font-black text-xl mb-2">Konfirmasi</h3>
             <p className="text-gray-600 font-medium mb-6 text-sm">{dialog.message}</p>
             <div className="flex gap-3 justify-end">
-              <button onClick={() => setDialog(prev => ({...prev, isOpen: false}))} className="px-5 py-2.5 rounded-xl font-bold text-gray-600 bg-gray-100 hover:bg-gray-200 transition-colors">Batal</button>
-              <button onClick={dialog.onConfirm} className="px-5 py-2.5 rounded-xl font-bold text-white bg-red-600 hover:bg-red-700 shadow-md transition-colors">Ya, Lanjutkan</button>
+              <button onClick={() => setDialog(p => ({ ...p, isOpen: false }))} className="px-5 py-2.5 rounded-xl font-bold text-gray-600 bg-gray-100">Batal</button>
+              <button onClick={dialog.onConfirm} className="px-5 py-2.5 rounded-xl font-bold text-white bg-red-600 shadow-md">Ya, Lanjutkan</button>
             </div>
           </div>
         </div>
       )}
 
-      {/* PATCH 5: Struk HTML Gaib (hidden print:block) sudah dihapus dari sini */}
-
-      {/* APLIKASI UTAMA */}
-      <div className={`min-h-screen ${THEME.bg} ${THEME.secondary} font-sans pb-10`}>
+      <div className="min-h-screen bg-[#FAF9F6] text-gray-900 font-sans pb-10">
         {/* NAVBAR */}
-        <div className="bg-white/90 backdrop-blur-md sticky top-0 z-40 p-4 border-b border-gray-100 mb-6 shadow-sm">
-          <div className="flex flex-wrap gap-4 items-center justify-between w-full px-2 md:px-6">
-            <h1 className="font-extrabold text-2xl tracking-tighter cursor-pointer" onClick={() => setActiveTab('KASIR')}>Warung<span className={`text-${THEME.primary}`}>Kasir</span></h1>
-            <div className="flex gap-2 bg-gray-100 p-1.5 rounded-2xl overflow-x-auto hide-scrollbar w-full md:w-auto">
+        <div className="bg-white/90 backdrop-blur-md sticky top-0 z-40 px-4 py-3 border-b border-gray-100 shadow-sm">
+          <div className="flex items-center justify-between gap-3 max-w-7xl mx-auto">
+            <h1 className="font-extrabold text-xl tracking-tighter shrink-0 cursor-pointer" onClick={() => setActiveTab('KASIR')}>Warung<span className="text-orange-600">Kasir</span></h1>
+            <div className="flex gap-1.5 bg-gray-100 p-1 rounded-2xl overflow-x-auto hide-scrollbar">
               {(['KASIR', 'TRACKER', 'REKAP', 'MASTER'] as const).map(tab => (
-                <button key={tab} onClick={() => { setActiveTab(tab); if(tab !== 'KASIR') clearKasir(); }} className={`font-bold px-4 py-2.5 rounded-xl transition-all whitespace-nowrap text-sm md:text-base ${activeTab === tab ? THEME.activeTab + ' shadow-md' : THEME.inactiveTab}`}>
+                <button key={tab} onClick={() => { setActiveTab(tab); if (tab !== 'KASIR') clearKasir(); }}
+                  className={`font-bold px-3 py-2 rounded-xl transition-all whitespace-nowrap text-xs md:text-sm ${activeTab === tab ? 'bg-orange-600 text-white shadow-sm' : 'bg-gray-100 text-gray-700 hover:bg-gray-200'}`}>
                   {tab === 'KASIR' ? '🛒 Order' : tab === 'TRACKER' ? '🍳 Dapur' : tab === 'REKAP' ? '📈 Rekap' : '⚙️ Menu'}
                 </button>
               ))}
@@ -298,233 +456,210 @@ export default function KasirWarung() {
           </div>
         </div>
 
-        <div className="w-full px-4 md:px-10">
-          {/* HALAMAN KASIR */}
+        <div className="w-full px-4 md:px-8 max-w-7xl mx-auto">
+
+          {/* ── KASIR ── */}
           {activeTab === 'KASIR' && (
-            <div className="grid grid-cols-1 xl:grid-cols-12 gap-8 items-start pb-28 xl:pb-0">
+            <div className="grid grid-cols-1 xl:grid-cols-12 gap-6 items-start pb-28 xl:pb-6 pt-5">
               <div className="xl:col-span-8">
-                <div className="flex flex-col md:flex-row md:justify-between md:items-center mb-6 gap-4">
-                  <h2 className="font-extrabold text-3xl tracking-tight">Explore Menu</h2>
-                  <div className="relative w-full md:max-w-md">
-                    <ModernInput type="text" placeholder="🔍 Cari menu..." className="pl-12 bg-white py-3" value={searchQuery} onChange={e => setSearchQuery(e.target.value)} />
-                  </div>
-                </div>
-                <div className="flex gap-2 overflow-x-auto pb-4 mb-2 hide-scrollbar">
+                <div className="mb-4"><ModernInput type="text" placeholder="🔍 Cari menu..." className="bg-white" value={searchQuery} onChange={e => setSearchQuery(e.target.value)} /></div>
+                <div className="flex gap-2 overflow-x-auto pb-3 mb-4 hide-scrollbar">
                   {categories.map(c => (
-                    <button key={c} onClick={() => setActiveCategory(c)} className={`px-5 py-2 rounded-full font-bold whitespace-nowrap border-2 transition-all ${activeCategory === c ? 'bg-orange-600 border-orange-600 text-white shadow-md' : 'bg-white border-gray-200 text-gray-600 hover:border-orange-300'}`}>{c}</button>
+                    <button key={c} onClick={() => setActiveCategory(c)}
+                      className={`px-4 py-1.5 rounded-full font-bold whitespace-nowrap border-2 text-sm transition-all ${activeCategory === c ? 'bg-orange-600 border-orange-600 text-white' : 'bg-white border-gray-200 text-gray-600'}`}>{c}</button>
                   ))}
                 </div>
-                <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-4 gap-4 md:gap-5">
-                  {filteredMenu.map(m => (
-                    <div key={m.id} onClick={() => addToCart(m)} className="bg-white p-5 rounded-3xl border-2 border-gray-100 cursor-pointer hover:border-orange-600 shadow-sm transition-all active:scale-95 group relative flex flex-col justify-between h-full min-h-[140px]">
-                      <div>
-                        <span className="text-[10px] font-bold bg-orange-100 text-orange-600 px-3 py-1 rounded-full">{m.category}</span>
-                        <p className="font-bold text-base md:text-lg mt-3 leading-tight group-hover:text-black">{m.name}</p>
-                      </div>
-                      <p className="text-gray-900 font-bold mt-2">Rp {m.price.toLocaleString('id-ID')}</p>
-                      <div className="absolute bottom-4 right-4 bg-orange-600 text-white w-7 h-7 rounded-full flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity font-bold">+</div>
-                    </div>
-                  ))}
+                <div className="grid grid-cols-2 sm:grid-cols-3 xl:grid-cols-4 gap-3">
+                  {filteredMenu.map(m => {
+                    const hasVariants = menuVariantGroups.some(mvg => mvg.menu_id === m.id);
+                    return (
+                      <button key={m.id} onClick={() => handleMenuClick(m)}
+                        className="bg-white p-4 rounded-2xl border-2 border-gray-100 text-left hover:border-orange-400 active:scale-95 transition-all group relative flex flex-col justify-between min-h-[110px] shadow-sm">
+                        <div>
+                          <span className="text-[10px] font-bold bg-orange-100 text-orange-600 px-2 py-0.5 rounded-full">{m.category}</span>
+                          <p className="font-bold text-sm mt-2 leading-snug">{m.name}</p>
+                        </div>
+                        <div className="flex items-center justify-between mt-2">
+                          <p className="font-black text-sm">Rp {m.price.toLocaleString('id-ID')}</p>
+                          {hasVariants && <span className="text-[9px] font-bold bg-blue-100 text-blue-600 px-1.5 py-0.5 rounded-full">varian</span>}
+                        </div>
+                        <div className="absolute bottom-3 right-3 bg-orange-600 text-white w-6 h-6 rounded-full flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity text-sm font-black">+</div>
+                      </button>
+                    );
+                  })}
                 </div>
               </div>
 
-              <div className={`xl:col-span-4 bg-white p-6 rounded-3xl border shadow-sm xl:sticky top-24 max-h-[85vh] overflow-y-auto ${isMobileCartOpen ? 'fixed inset-0 z-[60] rounded-none w-full h-full max-h-screen overflow-y-auto pb-24' : 'hidden xl:block'}`}>
-                <h2 className="font-extrabold text-2xl mb-6 border-b pb-4 flex justify-between items-center">
-                  <span>Check <span className="text-orange-600">Order</span></span>
-                  <div className="flex gap-2 items-center">
-                    {editingOrderId && <span className="text-xs bg-orange-100 text-orange-700 px-3 py-1 rounded-full animate-pulse">Edit Mode</span>}
-                    {isMobileCartOpen && <button onClick={() => setIsMobileCartOpen(false)} className="xl:hidden bg-gray-100 text-gray-700 px-4 py-2 rounded-full text-xs font-black shadow-sm">✕ Tutup</button>}
-                  </div>
-                </h2>
-                
-                <ModernInput placeholder="Nama Pelanggan" className="mb-3" value={customerName} onChange={e => setCustomerName(e.target.value)} />
-                <ModernInput placeholder="Catatan (Misal: Meja 4)" className="mb-4 text-sm" value={orderNote} onChange={e => setOrderNote(e.target.value)} />
-                
-                <div className="flex flex-col gap-3 mb-6 max-h-[35vh] overflow-y-auto pr-2">
-                  {cart.length === 0 && <p className="text-center text-gray-400 py-6 border-2 border-dashed rounded-2xl text-sm">Keranjang kosong</p>}
-                  {cart.map((item, idx) => (
-                    <div key={idx} className="bg-gray-50/80 p-4 rounded-2xl border border-gray-100 relative group">
-                      <div className="flex justify-between items-start gap-3">
-                        <div className="flex-1">
-                          <span className="font-bold text-sm md:text-base leading-snug block pr-5">{item.name}</span>
-                          <p className="text-sm text-gray-600 font-semibold mt-1">Rp {(item.price * (Number(item.qty)||1)).toLocaleString('id-ID')}</p>
-                        </div>
-                        
-                        <div className="flex items-center gap-1 bg-white border border-gray-200 rounded-xl px-1 py-1 shadow-sm shrink-0">
-                          <button onClick={() => updateQty(idx, -1)} className="text-gray-500 hover:text-orange-600 font-extrabold w-6 h-6 flex items-center justify-center">-</button>
-                          <input 
-                            type="number" 
-                            value={item.qty} 
-                            onChange={(e) => updateQtyDirect(idx, e.target.value)} 
-                            onBlur={() => handleQtyBlur(idx)} 
-                            className="w-8 text-center text-sm font-bold bg-transparent outline-none focus:bg-orange-50 rounded" 
-                          />
-                          <button onClick={() => updateQty(idx, 1)} className="text-gray-500 hover:text-orange-600 font-extrabold w-6 h-6 flex items-center justify-center">+</button>
-                        </div>
-                      </div>
-                      <div className="flex gap-2 mt-3 items-center">
-                        <select value={item.orderType} onChange={e => { const n = [...cart]; n[idx].orderType = e.target.value as any; setCart(n); }} className={`text-[10px] font-bold p-2 rounded-xl outline-none cursor-pointer border ${item.orderType === 'Take Away' ? 'bg-orange-100 text-orange-700' : 'bg-green-100 text-green-700'}`}>
-                          <option value="Take Away">🛍 Bungkus</option><option value="Dine In">🍽 Makan Sini</option>
-                        </select>
-                        <input placeholder="Catatan item..." className="w-full bg-white border border-gray-200 p-2 rounded-xl text-xs outline-none focus:border-red-400" value={item.note} onChange={e => { const n = [...cart]; n[idx].note = e.target.value; setCart(n); }} />
-                      </div>
+              {/* Cart */}
+              <div className={`xl:col-span-4 bg-white rounded-3xl border shadow-sm xl:sticky top-20 max-h-[calc(100vh-5rem)] overflow-y-auto ${isMobileCartOpen ? 'fixed inset-0 z-[60] rounded-none max-h-screen' : 'hidden xl:block'}`}>
+                <div className="p-5">
+                  <div className="flex justify-between items-center mb-4 border-b pb-3">
+                    <h2 className="font-black text-lg">Check <span className="text-orange-600">Order</span></h2>
+                    <div className="flex gap-2">
+                      {editingOrderId && <span className="text-xs bg-orange-100 text-orange-700 px-2 py-1 rounded-full">Edit Mode</span>}
+                      {isMobileCartOpen && <button onClick={() => setIsMobileCartOpen(false)} className="text-gray-500 font-bold text-sm bg-gray-100 px-3 py-1.5 rounded-xl">✕</button>}
                     </div>
-                  ))}
-                </div>
-
-                <div className="bg-white p-3.5 rounded-2xl border-2 border-dashed border-orange-200 mb-4 flex flex-col gap-2">
-                  <div className="font-black text-orange-600 text-[10px] uppercase tracking-wider">⚡ Menu Dadakan:</div>
-                  <div className="flex gap-2">
-                    <input placeholder="Nama item..." value={customName} onChange={e => setCustomName(e.target.value)} className="w-full bg-gray-50 border border-gray-200 text-xs p-2.5 rounded-xl outline-none focus:border-orange-600 font-bold" />
-                    <input placeholder="Harga" type="number" value={customPrice} onChange={e => setCustomPrice(e.target.value)} className="w-24 bg-gray-50 border border-gray-200 text-xs p-2.5 rounded-xl outline-none focus:border-orange-600 font-bold" />
-                    <button onClick={addCustomItemToCart} className="bg-orange-600 text-white font-black px-4 py-2 rounded-xl hover:bg-orange-700 transition-colors text-xs shadow-sm">+</button>
                   </div>
-                </div>
+                  <ModernInput placeholder="Nama Pelanggan" className="mb-2 text-sm" value={customerName} onChange={e => setCustomerName(e.target.value)} />
+                  <ModernInput placeholder="Catatan (Meja, dll)" className="mb-4 text-sm" value={orderNote} onChange={e => setOrderNote(e.target.value)} />
 
-                <div className="bg-orange-50 p-4 rounded-2xl mb-4 flex flex-col gap-3 border border-orange-100">
-                  <div className="flex justify-between items-center">
-                     <span className="text-sm font-bold text-orange-800">Metode Bayar:</span>
-                     <select value={paymentMethod} onChange={e => setPaymentMethod(e.target.value as any)} className="text-sm font-bold p-1 rounded-lg border-2 border-orange-200 outline-none">
-                       <option value="Belum Bayar">⏳ Nanti</option><option value="Cash">💵 Cash</option><option value="QRIS Mandiri">📱 QRIS Mandiri</option><option value="QRIS Gopay">📱 QRIS Gopay</option>
-                     </select>
-                  </div>
-
-                  {paymentMethod === 'Cash' && (
-                    <div className="pt-3 border-t border-orange-200 border-dashed">
-                      <div className="flex gap-2 mb-2">
-                         <input type="number" placeholder="Nominal uang... (Opsional)" value={cashGiven} onChange={e => setCashGiven(e.target.value)} className="w-full p-2.5 rounded-xl text-sm font-bold border-2 border-orange-200 outline-none focus:border-orange-600" />
-                      </div>
-                      <div className="flex gap-2 overflow-x-auto hide-scrollbar">
-                         <button onClick={() => setCashGiven(totalCart.toString())} className="px-3 py-1.5 bg-white border border-orange-300 rounded-lg text-xs font-black shrink-0 text-orange-700 shadow-sm">Uang Pas</button>
-                         <button onClick={() => setCashGiven('50000')} className="px-3 py-1.5 bg-white border border-orange-300 rounded-lg text-xs font-black shrink-0 text-orange-700 shadow-sm">50rb</button>
-                         <button onClick={() => setCashGiven('100000')} className="px-3 py-1.5 bg-white border border-orange-300 rounded-lg text-xs font-black shrink-0 text-orange-700 shadow-sm">100rb</button>
-                      </div>
-                      {(parseInt(cashGiven) || 0) > 0 && (
-                        <div className="mt-3 text-right bg-white p-3 rounded-xl border border-orange-100">
-                           <p className="text-[10px] font-black text-orange-400 uppercase tracking-widest">Kembalian:</p>
-                           <p className="text-xl font-black text-orange-600">Rp {Math.max(0, (parseInt(cashGiven) || 0) - totalCart).toLocaleString('id-ID')}</p>
+                  <div className="flex flex-col gap-2 mb-4 max-h-[35vh] overflow-y-auto pr-1">
+                    {cart.length === 0 && <p className="text-center text-gray-400 py-8 border-2 border-dashed rounded-2xl text-sm">Keranjang kosong</p>}
+                    {cart.map((item, idx) => (
+                      <div key={item.cartKey} className="bg-gray-50 p-3.5 rounded-2xl border border-gray-100">
+                        <div className="flex justify-between items-start gap-2">
+                          <div className="flex-1 min-w-0">
+                            <p className="font-bold text-sm leading-snug">{item.name}</p>
+                            {item.selectedVariants.length > 0 && <p className="text-xs text-orange-500 font-semibold mt-0.5">{item.selectedVariants.map(v => v.option_name).join(', ')}</p>}
+                            <p className="text-xs text-gray-400 mt-0.5">{item.orderType} · Rp {(item.finalPrice * (Number(item.qty) || 1)).toLocaleString('id-ID')}</p>
+                          </div>
+                          <div className="flex items-center gap-1 bg-white border border-gray-200 rounded-xl px-1 py-1 shadow-sm shrink-0">
+                            <button onClick={() => updateQty(idx, -1)} className="text-gray-500 hover:text-orange-600 font-black w-6 h-6 flex items-center justify-center">−</button>
+                            <input type="number" value={item.qty} onChange={e => updateQtyDirect(idx, e.target.value)} onBlur={() => handleQtyBlur(idx)} className="w-7 text-center text-sm font-bold bg-transparent outline-none" />
+                            <button onClick={() => updateQty(idx, 1)} className="text-gray-500 hover:text-orange-600 font-black w-6 h-6 flex items-center justify-center">+</button>
+                          </div>
                         </div>
-                      )}
-                    </div>
-                  )}
-                </div>
-
-                <div className="border-t pt-5">
-                  <div className="flex justify-between items-end text-3xl font-black mb-6 tracking-tighter">
-                    <span className="text-base text-gray-500 font-bold">Total Pay:</span>
-                    <span className="text-orange-600">Rp {totalCart.toLocaleString('id-ID')}</span>
+                        {item.note && <p className="text-xs text-red-400 mt-1 italic">📝 {item.note}</p>}
+                      </div>
+                    ))}
                   </div>
-                  <div className="flex gap-2">
-                     {editingOrderId && <button onClick={clearKasir} className="bg-gray-100 text-gray-500 font-bold px-4 rounded-2xl hover:bg-gray-200">Cancel</button>}
-                     <button onClick={handlePrintCart} className="bg-blue-100 text-blue-700 font-black px-4 rounded-2xl hover:bg-blue-200 transition-all text-2xl shadow-sm" title="Print Struk Langsung">🖨️</button>
-                     <button onClick={submitOrder} className="flex-1 bg-orange-600 text-white font-black py-4 rounded-2xl shadow-lg active:scale-95 transition-all">
-                      {editingOrderId ? 'Update Pesanan 🔄' : 'Kirim ke Dapur ✅'}
-                     </button>
+
+                  <div className="bg-orange-50 p-3 rounded-2xl border border-orange-100 mb-4">
+                    <p className="text-[10px] font-black text-orange-600 uppercase tracking-wider mb-2">⚡ Menu Dadakan</p>
+                    <div className="flex gap-2">
+                      <input placeholder="Nama item..." value={customName} onChange={e => setCustomName(e.target.value)} className="flex-1 bg-white border border-gray-200 text-xs p-2.5 rounded-xl outline-none focus:border-orange-600 font-bold min-w-0" />
+                      <input placeholder="Harga" type="number" value={customPrice} onChange={e => setCustomPrice(e.target.value)} className="w-20 bg-white border border-gray-200 text-xs p-2.5 rounded-xl outline-none font-bold" />
+                      <button onClick={addCustomItem} className="bg-orange-600 text-white font-black px-3 py-2 rounded-xl text-xs">+</button>
+                    </div>
+                  </div>
+
+                  <div className="bg-orange-50 p-3.5 rounded-2xl mb-4 border border-orange-100">
+                    <div className="flex justify-between items-center mb-2">
+                      <span className="text-xs font-bold text-orange-800">Metode Bayar</span>
+                      <select value={paymentMethod} onChange={e => setPaymentMethod(e.target.value as Order['payment_method'])} className="text-xs font-bold p-1.5 rounded-lg border-2 border-orange-200 outline-none bg-white">
+                        <option value="Belum Bayar">⏳ Nanti</option><option value="Cash">💵 Cash</option>
+                        <option value="QRIS Mandiri">📱 Mandiri</option><option value="QRIS Gopay">📱 Gopay</option>
+                      </select>
+                    </div>
+                    {paymentMethod === 'Cash' && (
+                      <div className="pt-2 border-t border-orange-200 border-dashed">
+                        <input type="number" placeholder="Nominal uang..." value={cashGiven} onChange={e => setCashGiven(e.target.value)} className="w-full p-2.5 rounded-xl text-sm font-bold border-2 border-orange-200 outline-none mb-2" />
+                        <div className="flex gap-1.5">
+                          {[{ label: 'Pas', val: totalCart.toString() }, { label: '50rb', val: '50000' }, { label: '100rb', val: '100000' }].map(b => (
+                            <button key={b.label} onClick={() => setCashGiven(b.val)} className="flex-1 py-1.5 bg-white border border-orange-200 rounded-lg text-xs font-black text-orange-700">{b.label}</button>
+                          ))}
+                        </div>
+                        {(parseInt(cashGiven) || 0) > 0 && (
+                          <div className="mt-2 text-right bg-white p-2.5 rounded-xl border border-orange-100">
+                            <p className="text-[10px] font-black text-orange-400 uppercase">Kembalian</p>
+                            <p className="text-lg font-black text-orange-600">Rp {Math.max(0, (parseInt(cashGiven) || 0) - totalCart).toLocaleString('id-ID')}</p>
+                          </div>
+                        )}
+                      </div>
+                    )}
+                  </div>
+
+                  <div className="border-t pt-4">
+                    <div className="flex justify-between items-center mb-4">
+                      <span className="text-sm text-gray-500 font-bold">Total</span>
+                      <span className="text-2xl font-black text-orange-600">Rp {totalCart.toLocaleString('id-ID')}</span>
+                    </div>
+                    <div className="flex gap-2">
+                      {editingOrderId && <button onClick={clearKasir} className="bg-gray-100 text-gray-500 font-bold px-3 rounded-2xl text-sm">Batal</button>}
+                      <button onClick={handlePrintCart} className="bg-blue-100 text-blue-700 font-black px-3 rounded-2xl text-xl">🖨️</button>
+                      <button onClick={submitOrder} className="flex-1 bg-orange-600 text-white font-black py-3.5 rounded-2xl shadow-lg active:scale-95 text-sm">
+                        {editingOrderId ? 'Update Pesanan 🔄' : 'Kirim ke Dapur ✅'}
+                      </button>
+                    </div>
                   </div>
                 </div>
               </div>
 
               {!isMobileCartOpen && (
-                <div className="fixed bottom-0 left-0 right-0 bg-white p-4 border-t border-gray-200 shadow-[0_-10px_40px_rgba(0,0,0,0.1)] z-50 xl:hidden flex justify-between items-center rounded-t-3xl">
-                   <div>
-                     <p className="text-xs text-gray-500 font-bold">Total ({cart.reduce((a,c)=>a+(Number(c.qty)||0),0)} item)</p>
-                     <p className="text-xl font-black text-orange-600">Rp {totalCart.toLocaleString('id-ID')}</p>
-                   </div>
-                   <button onClick={() => setIsMobileCartOpen(true)} className="bg-orange-600 text-white font-black px-6 py-3 rounded-2xl shadow-lg active:scale-95 transition-all flex gap-2 items-center">
-                     <span>🛒</span><span>Buka Kasir</span>
-                   </button>
+                <div className="fixed bottom-0 left-0 right-0 bg-white p-4 border-t shadow-[0_-4px_20px_rgba(0,0,0,0.08)] z-50 xl:hidden flex justify-between items-center">
+                  <div>
+                    <p className="text-xs text-gray-500 font-bold">{cart.reduce((a, c) => a + (Number(c.qty) || 0), 0)} item</p>
+                    <p className="text-lg font-black text-orange-600">Rp {totalCart.toLocaleString('id-ID')}</p>
+                  </div>
+                  <button onClick={() => setIsMobileCartOpen(true)} className="bg-orange-600 text-white font-black px-5 py-3 rounded-2xl shadow-lg text-sm">🛒 Buka Kasir</button>
                 </div>
               )}
             </div>
           )}
 
-          {/* HALAMAN TRACKER (DAPUR) */}
+          {/* ── TRACKER ── */}
           {activeTab === 'TRACKER' && (
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-6 pt-5">
               {(['To Do', 'Done'] as const).map(status => (
-                <div key={status} className="bg-white p-6 rounded-3xl border min-h-[60vh] shadow-sm">
-                  <h3 className="font-black text-xl mb-6 border-b pb-4 flex justify-between items-center">
+                <div key={status} className="bg-white p-5 rounded-3xl border min-h-[60vh] shadow-sm">
+                  <h3 className="font-black text-lg mb-5 border-b pb-3 flex justify-between items-center">
                     {status === 'To Do' ? '🍳 Dimasak' : '✅ Selesai'}
-                    <span className="bg-orange-100 text-orange-600 px-3 rounded-full text-sm">
-                      {orders.filter(o => { 
-                         if (status === 'To Do') return o.status === 'To Do' || o.status === 'In Progress';
-                         return o.status === 'Done' && new Date(o.created_at).toDateString() === new Date().toDateString(); 
-                      }).length}
+                    <span className="bg-orange-100 text-orange-600 px-2.5 py-0.5 rounded-full text-sm font-bold">
+                      {orders.filter(o => status === 'To Do' ? (o.status === 'To Do' || o.status === 'In Progress') : (o.status === 'Done' && new Date(o.created_at).toDateString() === new Date().toDateString())).length}
                     </span>
                   </h3>
-                  
-                  {orders.filter(o => { 
-                     if (status === 'To Do') return o.status === 'To Do' || o.status === 'In Progress';
-                     return o.status === 'Done' && new Date(o.created_at).toDateString() === new Date().toDateString(); 
-                  }).map(o => (
-                    <div key={o.id} className="bg-gray-50 p-5 rounded-3xl border border-gray-100 mb-5 relative group shadow-sm">
-                      <div className="absolute top-4 right-4 flex flex-col gap-2 items-end z-10">
-                        <div className="flex gap-2">
-                          <button onClick={() => handlePrintOrder(o, trackerCashGiven[o.id])} className="text-[12px] bg-blue-100 text-blue-700 px-2.5 py-1 rounded-lg font-black shadow-sm border border-blue-200">🖨️ Print</button>
-                          <button onClick={() => { setEditingOrderId(o.id); setCustomerName(o.customer_name); setCart(o.items); setOrderNote(o.order_note); setPaymentMethod(o.payment_method); setActiveTab('KASIR'); }} className="text-[10px] bg-yellow-500 text-white px-2 py-1 rounded-lg font-bold">Edit</button>
-                          <button onClick={() => deleteOrder(o.id)} className="text-[10px] bg-red-600 text-white px-2 py-1 rounded-lg font-bold">Batal</button>
+                  {orders.filter(o => status === 'To Do' ? (o.status === 'To Do' || o.status === 'In Progress') : (o.status === 'Done' && new Date(o.created_at).toDateString() === new Date().toDateString())).map(o => (
+                    <div key={o.id} className="bg-gray-50 p-4 rounded-2xl border border-gray-100 mb-4 shadow-sm">
+                      <div className="flex justify-between items-start mb-2">
+                        <p className="font-black text-lg">{o.customer_name}</p>
+                        <div className="flex flex-col gap-1.5 items-end">
+                          <div className="flex gap-1.5">
+                            <button onClick={() => handlePrintOrder(o, trackerCashGiven[o.id])} className="text-[11px] bg-blue-100 text-blue-700 px-2 py-1 rounded-lg font-black">🖨️</button>
+                            <button onClick={() => { setEditingOrderId(o.id); setCustomerName(o.customer_name); setCart(o.items); setOrderNote(o.order_note); setPaymentMethod(o.payment_method); setActiveTab('KASIR'); }} className="text-[11px] bg-yellow-400 text-white px-2 py-1 rounded-lg font-bold">Edit</button>
+                            <button onClick={() => deleteOrder(o.id)} className="text-[11px] bg-red-500 text-white px-2 py-1 rounded-lg font-bold">Batal</button>
+                          </div>
+                          <button onClick={() => copyToClipboard(o)} className="text-[10px] bg-green-100 text-green-700 px-2 py-1 rounded-lg font-black border border-green-200">📋 WA</button>
                         </div>
-                        <button onClick={() => copyToClipboard(o)} className="bg-green-100 text-green-700 px-2 py-1 rounded-lg font-black text-[10px] hover:bg-green-200 transition-colors shrink-0 border border-green-200">📋 COPY WA</button>
                       </div>
-                      
-                      <div className="flex justify-between items-start mb-2 pr-20">
-                        <p className="font-black text-xl text-gray-900 leading-tight">{o.customer_name}</p>
-                      </div>
-                      
-                      <select value={o.payment_method} onChange={e => updatePayment(o.id, e.target.value)} className={`text-[10px] font-bold p-1 rounded-lg border mt-2 mb-4 outline-none ${o.payment_method === 'Belum Bayar' ? 'bg-red-50 text-red-600 border-red-200' : 'bg-green-50 text-green-700 border-green-200'}`}>
-                         <option value="Belum Bayar">Belum Lunas</option>
-                         <option value="Cash">Lunas (Cash)</option>
-                         <option value="QRIS Mandiri">Lunas (QRIS Mandiri)</option>
-                         <option value="QRIS Gopay">Lunas (QRIS Gopay)</option>
+                      <select value={o.payment_method} onChange={e => updatePayment(o.id, e.target.value)}
+                        className={`text-[10px] font-bold p-1.5 rounded-lg border mb-3 outline-none ${o.payment_method === 'Belum Bayar' ? 'bg-red-50 text-red-600 border-red-200' : 'bg-green-50 text-green-700 border-green-200'}`}>
+                        <option value="Belum Bayar">Belum Lunas</option><option value="Cash">Lunas (Cash)</option>
+                        <option value="QRIS Mandiri">Lunas (QRIS Mandiri)</option><option value="QRIS Gopay">Lunas (QRIS Gopay)</option>
                       </select>
 
                       {o.payment_method === 'Cash' && (
-                        <div className="mt-2 mb-4 p-3 bg-orange-50 rounded-xl border border-orange-100">
-                           <p className="text-[10px] font-bold text-orange-800 mb-1">Kalkulator Kembalian:</p>
-                           <div className="flex gap-2 mb-2">
-                              <input type="number" placeholder="Nominal uang..." value={trackerCashGiven[o.id] || ''} onChange={e => setTrackerCashGiven({...trackerCashGiven, [o.id]: e.target.value})} className="w-full p-2 rounded-lg text-xs font-bold border border-orange-200 outline-none" />
-                           </div>
-                           <div className="flex gap-1 overflow-x-auto hide-scrollbar mb-2">
-                              <button onClick={() => setTrackerCashGiven({...trackerCashGiven, [o.id]: o.total.toString()})} className="px-2 py-1 bg-white border border-orange-300 rounded text-[10px] font-black text-orange-700">Pas</button>
-                              <button onClick={() => setTrackerCashGiven({...trackerCashGiven, [o.id]: '50000'})} className="px-2 py-1 bg-white border border-orange-300 rounded text-[10px] font-black text-orange-700">50rb</button>
-                              <button onClick={() => setTrackerCashGiven({...trackerCashGiven, [o.id]: '100000'})} className="px-2 py-1 bg-white border border-orange-300 rounded text-[10px] font-black text-orange-700">100rb</button>
-                           </div>
-                           {(parseInt(trackerCashGiven[o.id]) > 0) && (
-                             <div className="flex justify-between items-center bg-white p-2 rounded border border-orange-100">
-                               <span className="text-[10px] font-bold text-orange-400">Kembali:</span>
-                               <span className="text-sm font-black text-orange-600">Rp {Math.max(0, parseInt(trackerCashGiven[o.id]) - o.total).toLocaleString('id-ID')}</span>
-                             </div>
-                           )}
+                        <div className="mb-3 p-3 bg-orange-50 rounded-xl border border-orange-100">
+                          <p className="text-[10px] font-bold text-orange-800 mb-1">Kalkulator Kembalian</p>
+                          <input type="number" placeholder="Nominal uang..." value={trackerCashGiven[o.id] || ''} onChange={e => setTrackerCashGiven({ ...trackerCashGiven, [o.id]: e.target.value })} className="w-full p-2 rounded-lg text-xs font-bold border border-orange-200 outline-none mb-1.5" />
+                          <div className="flex gap-1 mb-1.5">
+                            {[{ l: 'Pas', v: o.total.toString() }, { l: '50rb', v: '50000' }, { l: '100rb', v: '100000' }].map(b => (
+                              <button key={b.l} onClick={() => setTrackerCashGiven({ ...trackerCashGiven, [o.id]: b.v })} className="px-2 py-1 bg-white border border-orange-200 rounded text-[10px] font-black text-orange-700">{b.l}</button>
+                            ))}
+                          </div>
+                          {(parseInt(trackerCashGiven[o.id]) || 0) > 0 && (
+                            <div className="flex justify-between bg-white p-2 rounded border border-orange-100">
+                              <span className="text-[10px] font-bold text-orange-400">Kembali:</span>
+                              <span className="text-sm font-black text-orange-600">Rp {Math.max(0, parseInt(trackerCashGiven[o.id]) - o.total).toLocaleString('id-ID')}</span>
+                            </div>
+                          )}
                         </div>
                       )}
-                      
-                      <div className="space-y-2 mb-5 bg-white p-3 rounded-xl border border-gray-100">
+
+                      <div className="space-y-1.5 mb-4 bg-white p-3 rounded-xl border border-gray-100">
                         {o.items.map((it, i) => (
                           <div key={i} className="flex items-start gap-2 cursor-pointer" onClick={() => toggleItemDone(o.id, i)}>
-                             <input type="checkbox" checked={it.isDone} readOnly className="mt-1 w-4 h-4 rounded text-orange-600 focus:ring-orange-500 cursor-pointer pointer-events-none" />
-                             <div className="flex-1">
-                               <div className="flex justify-between">
-                                 <p className={`text-sm font-bold transition-all ${it.isDone ? 'line-through text-gray-400' : 'text-gray-900'}`}>{it.qty}x {it.name}</p>
-                                 <span className="text-gray-400 font-medium text-[11px] mt-0.5">Rp {(Number(it.qty) * it.price).toLocaleString('id-ID')}</span>
-                               </div>
-                               <div className="flex gap-2 items-center mt-1">
-                                 <span className={`text-[9px] font-bold px-1 rounded ${it.orderType === 'Take Away' ? 'bg-orange-100 text-orange-600' : 'bg-green-100 text-green-600'}`}>{it.orderType}</span>
-                                 {it.note && <span className="text-[10px] text-red-500 font-medium italic">-{it.note}</span>}
-                               </div>
-                             </div>
+                            <input type="checkbox" checked={it.isDone} readOnly className="mt-1 w-4 h-4 rounded pointer-events-none" />
+                            <div className="flex-1">
+                              <div className="flex justify-between">
+                                <p className={`text-sm font-bold ${it.isDone ? 'line-through text-gray-400' : ''}`}>{it.qty}x {it.name}</p>
+                                <span className="text-gray-400 text-[11px]">Rp {(Number(it.qty) * (it.finalPrice ?? it.price)).toLocaleString('id-ID')}</span>
+                              </div>
+                              {it.selectedVariants?.length > 0 && <p className="text-[10px] text-orange-500 font-semibold">{it.selectedVariants.map(v => v.option_name).join(', ')}</p>}
+                              <div className="flex gap-1.5 mt-0.5">
+                                <span className={`text-[9px] font-bold px-1.5 rounded ${it.orderType === 'Take Away' ? 'bg-orange-100 text-orange-600' : 'bg-green-100 text-green-600'}`}>{it.orderType}</span>
+                                {it.note && <span className="text-[10px] text-red-400 italic">- {it.note}</span>}
+                              </div>
+                            </div>
                           </div>
                         ))}
                       </div>
-                      <div className="flex justify-between items-center mt-3 mb-4 px-1 border-t border-gray-200 pt-3">
-                        <span className="text-xs font-black text-gray-400 uppercase">Total Pay:</span>
-                        <span className="text-lg font-black text-orange-600">Rp {o.total.toLocaleString('id-ID')}</span>
+                      <div className="flex justify-between items-center border-t pt-3 mb-3">
+                        <span className="text-xs font-black text-gray-400 uppercase">Total</span>
+                        <span className="text-base font-black text-orange-600">Rp {o.total.toLocaleString('id-ID')}</span>
                       </div>
-                      
-                      <div className="flex gap-2">
-                        {(o.status === 'To Do' || o.status === 'In Progress') && (
-                          <button onClick={() => updateStatus(o.id, 'Done')} className="flex-1 bg-green-600 text-white py-3 rounded-xl font-black text-xs">Siap Saji ✅</button>
-                        )}
-                      </div>
+                      {(o.status === 'To Do' || o.status === 'In Progress') && (
+                        <button onClick={() => updateStatus(o.id, 'Done')} className="w-full bg-green-600 text-white py-2.5 rounded-xl font-black text-xs">Siap Saji ✅</button>
+                      )}
                     </div>
                   ))}
                 </div>
@@ -532,122 +667,46 @@ export default function KasirWarung() {
             </div>
           )}
 
-          {/* HALAMAN REKAP */}
+          {/* ── REKAP ── */}
           {activeTab === 'REKAP' && (
-            <div className="max-w-5xl mx-auto">
-              <div className="flex flex-col md:flex-row justify-between items-center mb-10 gap-4">
-                <h2 className="font-black text-4xl tracking-tighter">Laporan <span className="text-orange-600">Duit</span></h2>
-                <select value={recapFilter} onChange={e => setRecapFilter(e.target.value as any)} className="bg-white border-4 border-gray-100 p-3 rounded-2xl font-black shadow-sm outline-none w-full md:w-auto">
-                  <option value="Hari Ini">Hari Ini</option>
-                  <option value="Minggu Ini">Minggu Ini</option>
-                  <option value="Semua">Semua Waktu</option>
+            <div className="max-w-5xl mx-auto pt-5">
+              <div className="flex justify-between items-center mb-6 gap-3 flex-wrap">
+                <h2 className="font-black text-3xl tracking-tighter">Laporan <span className="text-orange-600">Duit</span></h2>
+                <select value={recapFilter} onChange={e => setRecapFilter(e.target.value as typeof recapFilter)} className="bg-white border-2 border-gray-200 p-2.5 rounded-2xl font-black outline-none text-sm">
+                  <option value="Hari Ini">Hari Ini</option><option value="Minggu Ini">Minggu Ini</option><option value="Semua">Semua Waktu</option>
                 </select>
               </div>
-              <div className="grid grid-cols-2 md:grid-cols-4 gap-4 md:gap-8 mb-10">
-                <div className="bg-white p-6 rounded-3xl shadow-sm border border-gray-100 text-center flex flex-col items-center"><p className="text-gray-400 font-bold text-[10px] uppercase mb-1 tracking-widest">Total Omzet</p><p className="text-2xl font-black text-green-600">Rp {revenue.toLocaleString('id-ID')}</p></div>
-                <div className="bg-white p-6 rounded-3xl shadow-sm border border-gray-100 text-center flex flex-col items-center"><p className="text-gray-400 font-bold text-[10px] uppercase mb-1 tracking-widest">Cash</p><p className="text-2xl font-black text-orange-600">Rp {cash.toLocaleString('id-ID')}</p></div>
-                <div className="bg-white p-6 rounded-3xl shadow-sm border border-gray-100 text-center flex flex-col items-center"><p className="text-gray-400 font-bold text-[10px] uppercase mb-1 tracking-widest">Mandiri</p><p className="text-2xl font-black text-blue-600">Rp {qrisMandiri.toLocaleString('id-ID')}</p></div>
-                <div className="bg-white p-6 rounded-3xl shadow-sm border border-gray-100 text-center flex flex-col items-center"><p className="text-gray-400 font-bold text-[10px] uppercase mb-1 tracking-widest">Gopay</p><p className="text-2xl font-black text-blue-400">Rp {qrisGopay.toLocaleString('id-ID')}</p></div>
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-6">
+                {[{ label: 'Total Omzet', value: revenue, color: 'text-green-600' }, { label: 'Cash', value: cash, color: 'text-orange-600' }, { label: 'Mandiri', value: qrisMandiri, color: 'text-blue-600' }, { label: 'Gopay', value: qrisGopay, color: 'text-blue-400' }].map(({ label, value, color }) => (
+                  <div key={label} className="bg-white p-4 rounded-3xl shadow-sm border border-gray-100 text-center">
+                    <p className="text-gray-400 font-bold text-[10px] uppercase mb-1 tracking-widest">{label}</p>
+                    <p className={`text-xl font-black ${color}`}>Rp {value.toLocaleString('id-ID')}</p>
+                  </div>
+                ))}
               </div>
-              
               <div className="overflow-x-auto bg-white rounded-3xl border shadow-sm">
-                 <table className="w-full text-left whitespace-nowrap">
-                    <thead className="bg-gray-50">
-                      <tr className="text-[10px] font-black uppercase text-gray-500 border-b">
-                        <th className="p-4 rounded-tl-3xl">Waktu</th>
-                        <th className="p-4">Customer</th>
-                        <th className="p-4">Metode</th>
-                        <th className="p-4 text-right">Total</th>
-                        <th className="p-4 text-center rounded-tr-3xl">Aksi</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {recapOrders.map(o => (
-                        <tr key={o.id} className="border-b hover:bg-orange-50/30 transition-colors">
-                          <td className="p-4 text-xs font-bold text-gray-400">{new Date(o.created_at).toLocaleTimeString('id-ID', {hour:'2-digit', minute:'2-digit'})}</td>
-                          <td className="p-4 relative group cursor-pointer">
-                            <span className="font-black text-sm border-b border-dashed border-gray-400 pb-0.5">{o.customer_name}</span>
-                            <div className="absolute left-4 top-full mt-1 w-56 bg-white border border-gray-200 shadow-xl rounded-2xl p-4 z-50 hidden group-hover:flex flex-col gap-1">
-                               <p className="text-[9px] font-black text-gray-400 uppercase tracking-widest border-b pb-2 mb-1">Detail Pesanan</p>
-                               {o.items.map((it, i) => (<div key={i} className="flex justify-between text-xs font-bold text-gray-700 whitespace-normal"><span>{it.qty}x {it.name}</span><span className="text-gray-400 shrink-0 ml-2">Rp {(Number(it.qty) * it.price).toLocaleString('id-ID')}</span></div>))}
-                            </div>
-                          </td>
-                          <td className="p-4"><span className={`text-[10px] font-bold px-2 py-1 rounded-lg whitespace-nowrap ${o.payment_method.includes('QRIS') ? 'bg-blue-100 text-blue-700' : 'bg-orange-100 text-orange-700'}`}>{o.payment_method}</span></td>
-                          <td className="p-4 text-right font-bold text-sm">Rp {o.total.toLocaleString('id-ID')}</td>
-                          <td className="p-4 text-center">
-                            <button onClick={() => handlePrintOrder(o)} className="text-xl hover:scale-125 transition-transform" title="Print Ulang Nota">🖨️</button>
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                 </table>
-              </div>
-            </div>
-          )}
-
-          {/* HALAMAN MASTER */}
-          {activeTab === 'MASTER' && (
-            <div className="bg-white p-4 md:p-8 rounded-3xl md:rounded-[40px] shadow-sm border w-full">
-              <div className="flex flex-col md:flex-row justify-between items-center mb-6 md:mb-8 gap-4">
-                <h2 className="font-black text-3xl tracking-tighter">Manage <span className="text-orange-600">Master Menu</span></h2>
-                <div className="w-full md:max-w-xl flex flex-col md:flex-row gap-3">
-                   <select value={masterCategoryFilter} onChange={e => setMasterCategoryFilter(e.target.value)} className="bg-gray-50 border-2 border-gray-200 rounded-2xl p-3.5 font-bold outline-none focus:border-orange-600 w-full md:w-1/3 text-sm">
-                     <option value="All">Semua Kategori</option>
-                     {categories.filter(c => c !== 'All').map(c => ( <option key={c} value={c}>{c}</option> ))}
-                   </select>
-                   <ModernInput placeholder="🔍 Cari nama menu di sini..." value={masterSearch} onChange={e => setMasterSearch(e.target.value)} className="bg-gray-50 w-full md:w-2/3" />
-                </div>
-              </div>
-              <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-10 bg-gray-50 p-6 rounded-3xl border border-gray-100">
-                <div>
-                  <label className="text-[10px] font-black uppercase text-gray-500 mb-2 block ml-2">Kategori</label>
-                  <select value={newMenuCategory} onChange={e => setNewMenuCategory(e.target.value)} className="w-full bg-white p-3.5 rounded-2xl border-2 border-gray-200 font-bold outline-none focus:border-orange-600">
-                     <option>Nasi</option><option>Ala Carte</option><option>Snack</option><option>Minuman</option><option>Tambahan</option><option>Rokok</option><option>Sembako</option>
-                  </select>
-                </div>
-                <div><label className="text-[10px] font-black uppercase text-gray-500 mb-2 block ml-2">Nama Menu</label><ModernInput placeholder="Contoh: Es Teh" value={newMenuName} onChange={e => setNewMenuName(e.target.value)} /></div>
-                <div><label className="text-[10px] font-black uppercase text-gray-500 mb-2 block ml-2">Harga</label><ModernInput placeholder="3000" type="number" value={newMenuPrice} onChange={e => setNewMenuPrice(e.target.value)} /></div>
-                <div className="flex items-end mt-2 md:mt-0"><button onClick={handleAddMenuToMaster} className="w-full h-[54px] bg-orange-600 text-white font-black rounded-2xl shadow-lg hover:bg-orange-700 active:scale-95 transition-all">Simpan Menu 💾</button></div>
-              </div>
-              <div className="overflow-x-auto bg-white rounded-2xl border border-gray-100">
                 <table className="w-full text-left whitespace-nowrap">
-                  <thead className="bg-gray-50">
-                    <tr className="border-b-2 text-xs font-black text-gray-400 uppercase select-none">
-                      <th className="p-5 cursor-pointer hover:bg-gray-100 transition-colors" onClick={() => requestSort('category')}>Category <span className="text-[8px] ml-1">{getSortIcon('category')}</span></th>
-                      <th className="p-5 cursor-pointer hover:bg-gray-100 transition-colors" onClick={() => requestSort('name')}>Menu Name <span className="text-[8px] ml-1">{getSortIcon('name')}</span></th>
-                      <th className="p-5 cursor-pointer hover:bg-gray-100 transition-colors" onClick={() => requestSort('price')}>Price <span className="text-[8px] ml-1">{getSortIcon('price')}</span></th>
-                      <th className="p-5 text-center">Action</th>
-                    </tr>
-                  </thead>
+                  <thead className="bg-gray-50"><tr className="text-[10px] font-black uppercase text-gray-500 border-b">
+                    <th className="p-4">Waktu</th><th className="p-4">Customer</th><th className="p-4">Metode</th><th className="p-4 text-right">Total</th><th className="p-4 text-center">Print</th>
+                  </tr></thead>
                   <tbody>
-                    {menuList
-                      .filter(m => (masterCategoryFilter === 'All' || m.category === masterCategoryFilter) && m.name.toLowerCase().includes(masterSearch.toLowerCase()))
-                      .sort((a, b) => {
-                        if (a[sortConfig.key] < b[sortConfig.key]) return sortConfig.direction === 'asc' ? -1 : 1;
-                        if (a[sortConfig.key] > b[sortConfig.key]) return sortConfig.direction === 'asc' ? 1 : -1;
-                        return 0;
-                      })
-                      .map(m => (
-                      <tr key={m.id} className="border-b hover:bg-gray-50 transition-colors">
-                        <td className="p-5"><span className="text-[10px] font-black bg-gray-100 text-gray-600 px-3 py-1 rounded-full uppercase">{m.category}</span></td>
-                        <td className="p-5 font-black text-gray-900">
-                          {editingMenuId === m.id ? ( <input type="text" className="border-2 border-orange-300 rounded-lg p-1 w-full outline-none font-bold min-w-[150px]" value={editName} onChange={e => setEditName(e.target.value)} /> ) : ( m.name )}
+                    {recapOrders.map(o => (
+                      <tr key={o.id} className="border-b hover:bg-orange-50/30">
+                        <td className="p-4 text-xs font-bold text-gray-400">{new Date(o.created_at).toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' })}</td>
+                        <td className="p-4 relative group cursor-pointer">
+                          <span className="font-black text-sm border-b border-dashed border-gray-400">{o.customer_name}</span>
+                          <div className="absolute left-4 top-full mt-1 w-60 bg-white border border-gray-200 shadow-xl rounded-2xl p-4 z-50 hidden group-hover:flex flex-col gap-1">
+                            {o.items.map((it, i) => (
+                              <div key={i} className="flex justify-between text-xs font-bold text-gray-700 whitespace-normal">
+                                <span>{it.qty}x {it.name}{it.selectedVariants?.length > 0 ? ` (${it.selectedVariants.map(v => v.option_name).join(', ')})` : ''}</span>
+                                <span className="text-gray-400 ml-2 shrink-0">Rp {(Number(it.qty) * (it.finalPrice ?? it.price)).toLocaleString('id-ID')}</span>
+                              </div>
+                            ))}
+                          </div>
                         </td>
-                        <td className="p-5 font-bold text-gray-600">
-                          {editingMenuId === m.id ? (
-                            <div className="flex gap-2">
-                               <input type="number" className="border-2 border-orange-300 rounded-lg p-1 w-24 outline-none font-bold" value={editPrice} onChange={e => setEditPrice(e.target.value)} autoFocus />
-                               <button onClick={() => handleUpdateMenu(m.id)} className="bg-green-500 text-white px-3 py-1 rounded-lg text-xs font-black shadow-sm">OK</button>
-                               <button onClick={() => setEditingMenuId(null)} className="bg-gray-400 text-white px-2 py-1 rounded-lg text-xs">✕</button>
-                            </div>
-                          ) : (
-                            <div className="flex items-center gap-3">
-                               <span className="text-base">Rp {m.price.toLocaleString('id-ID')}</span>
-                               <button onClick={() => { setEditingMenuId(m.id); setEditPrice(m.price.toString()); setEditName(m.name); }} className="text-blue-500 text-[10px] font-black uppercase hover:underline">✏️ Edit</button>
-                            </div>
-                          )}
-                        </td>
-                        <td className="p-5 text-center"><button onClick={() => handleDeleteMenuFromMaster(m.id)} className="text-red-500 hover:bg-red-50 px-4 py-2 rounded-xl transition-colors font-black text-xs uppercase">Hapus 🗑️</button></td>
+                        <td className="p-4"><span className={`text-[10px] font-bold px-2 py-1 rounded-lg ${o.payment_method.includes('QRIS') ? 'bg-blue-100 text-blue-700' : 'bg-orange-100 text-orange-700'}`}>{o.payment_method}</span></td>
+                        <td className="p-4 text-right font-bold text-sm">Rp {o.total.toLocaleString('id-ID')}</td>
+                        <td className="p-4 text-center"><button onClick={() => handlePrintOrder(o)} className="text-lg hover:scale-125 transition-transform">🖨️</button></td>
                       </tr>
                     ))}
                   </tbody>
@@ -655,20 +714,238 @@ export default function KasirWarung() {
               </div>
             </div>
           )}
+
+          {/* ── MASTER ── */}
+          {activeTab === 'MASTER' && (
+            <div className="pt-5">
+              {/* Sub-tab */}
+              <div className="flex gap-2 mb-6 bg-gray-100 p-1 rounded-2xl w-fit">
+                {(['MENU', 'VARIAN'] as const).map(t => (
+                  <button key={t} onClick={() => setMasterSubTab(t)}
+                    className={`px-5 py-2.5 rounded-xl font-black text-sm transition-all ${masterSubTab === t ? 'bg-white text-orange-600 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}>
+                    {t === 'MENU' ? '🍽 Menu Utama' : '🎛 Kategori Varian'}
+                  </button>
+                ))}
+              </div>
+
+              {/* ── SUB-TAB: MENU ── */}
+              {masterSubTab === 'MENU' && (
+                <div className="space-y-5">
+                  <div className="bg-white p-5 rounded-3xl border shadow-sm">
+                    <h3 className="font-black text-lg mb-4">Tambah Menu Baru</h3>
+                    <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
+                      <select value={newMenuCategory} onChange={e => setNewMenuCategory(e.target.value)} className="bg-gray-50 border-2 border-gray-200 rounded-2xl p-3 font-bold outline-none focus:border-orange-600 text-sm">
+                        {['Nasi', 'Ala Carte', 'Snack', 'Minuman', 'Tambahan', 'Rokok', 'Sembako'].map(c => <option key={c}>{c}</option>)}
+                      </select>
+                      <ModernInput placeholder="Nama Menu" value={newMenuName} onChange={e => setNewMenuName(e.target.value)} className="text-sm" />
+                      <ModernInput placeholder="Harga" type="number" value={newMenuPrice} onChange={e => setNewMenuPrice(e.target.value)} className="text-sm" />
+                      <button onClick={handleAddMenu} className="bg-orange-600 text-white font-black rounded-2xl py-3 text-sm shadow-md hover:bg-orange-700 active:scale-95">Simpan 💾</button>
+                    </div>
+                  </div>
+
+                  <div className="bg-white rounded-3xl border shadow-sm overflow-hidden">
+                    <div className="p-5 border-b flex flex-col md:flex-row gap-3 items-start md:items-center">
+                      <h3 className="font-black text-lg shrink-0">Daftar Menu</h3>
+                      <div className="flex gap-2 md:ml-auto w-full md:w-auto">
+                        <select value={masterCategoryFilter} onChange={e => setMasterCategoryFilter(e.target.value)} className="bg-gray-50 border-2 border-gray-200 rounded-xl p-2 font-bold outline-none text-sm">
+                          <option value="All">Semua</option>{categories.filter(c => c !== 'All').map(c => <option key={c}>{c}</option>)}
+                        </select>
+                        <ModernInput placeholder="Cari..." value={masterSearch} onChange={e => setMasterSearch(e.target.value)} className="text-sm" />
+                      </div>
+                    </div>
+                    <div className="overflow-x-auto">
+                      <table className="w-full text-left whitespace-nowrap">
+                        <thead className="bg-gray-50"><tr className="text-xs font-black text-gray-400 uppercase border-b">
+                          <th className="p-4 cursor-pointer" onClick={() => setSortConfig(p => ({ key: 'category', direction: p.key === 'category' && p.direction === 'asc' ? 'desc' : 'asc' }))}>Kategori</th>
+                          <th className="p-4 cursor-pointer" onClick={() => setSortConfig(p => ({ key: 'name', direction: p.key === 'name' && p.direction === 'asc' ? 'desc' : 'asc' }))}>Nama</th>
+                          <th className="p-4">Harga</th>
+                          <th className="p-4 text-center">Varian Aktif</th>
+                          <th className="p-4 text-center">Aksi</th>
+                        </tr></thead>
+                        <tbody>
+                          {menuList.filter(m => (masterCategoryFilter === 'All' || m.category === masterCategoryFilter) && m.name.toLowerCase().includes(masterSearch.toLowerCase()))
+                            .sort((a, b) => { if (a[sortConfig.key] < b[sortConfig.key]) return sortConfig.direction === 'asc' ? -1 : 1; if (a[sortConfig.key] > b[sortConfig.key]) return sortConfig.direction === 'asc' ? 1 : -1; return 0; })
+                            .map(m => {
+                              const linkedGroups = menuVariantGroups.filter(mvg => mvg.menu_id === m.id).map(mvg => variantGroups.find(g => g.id === mvg.group_id)).filter(Boolean) as VariantGroup[];
+                              const isExpanded = expandedMenuVariantId === m.id;
+                              return (
+                                <React.Fragment key={m.id}>
+                                  <tr className="border-b hover:bg-gray-50 transition-colors">
+                                    <td className="p-4"><span className="text-[10px] font-black bg-gray-100 text-gray-600 px-2 py-0.5 rounded-full uppercase">{m.category}</span></td>
+                                    <td className="p-4 font-black text-sm">
+                                      {editingMenuId === m.id
+                                        ? <input className="border-2 border-orange-300 rounded-lg p-1 w-full outline-none font-bold" value={editName} onChange={e => setEditName(e.target.value)} />
+                                        : m.name}
+                                    </td>
+                                    <td className="p-4 font-bold text-sm text-gray-600">
+                                      {editingMenuId === m.id
+                                        ? <div className="flex gap-2">
+                                          <input type="number" className="border-2 border-orange-300 rounded-lg p-1 w-24 outline-none font-bold" value={editPrice} onChange={e => setEditPrice(e.target.value)} autoFocus />
+                                          <button onClick={() => handleUpdateMenu(m.id)} className="bg-green-500 text-white px-2 py-1 rounded-lg text-xs font-black">OK</button>
+                                          <button onClick={() => setEditingMenuId(null)} className="bg-gray-400 text-white px-2 py-1 rounded-lg text-xs">✕</button>
+                                        </div>
+                                        : <div className="flex items-center gap-2">
+                                          <span>Rp {m.price.toLocaleString('id-ID')}</span>
+                                          <button onClick={() => { setEditingMenuId(m.id); setEditPrice(m.price.toString()); setEditName(m.name); }} className="text-blue-500 text-xs font-black hover:underline">✏️</button>
+                                        </div>}
+                                    </td>
+                                    <td className="p-4 text-center">
+                                      <button onClick={() => setExpandedMenuVariantId(isExpanded ? null : m.id)}
+                                        className={`text-xs font-black px-3 py-1.5 rounded-lg transition-colors ${linkedGroups.length > 0 ? 'bg-blue-100 text-blue-700 hover:bg-blue-200' : 'bg-gray-100 text-gray-500 hover:bg-gray-200'}`}>
+                                        {linkedGroups.length > 0 ? `${linkedGroups.map(g => g.name).join(', ')}` : 'Tidak ada'}
+                                      </button>
+                                    </td>
+                                    <td className="p-4 text-center">
+                                      <button onClick={() => handleDeleteMenu(m.id)} className="text-xs font-black px-3 py-1.5 rounded-lg bg-red-100 text-red-600 hover:bg-red-200">🗑️</button>
+                                    </td>
+                                  </tr>
+                                  {isExpanded && (
+                                    <tr className="bg-blue-50/40">
+                                      <td colSpan={5} className="px-6 py-4">
+                                        <p className="text-xs font-black text-blue-700 uppercase tracking-wider mb-3">Hubungkan varian ke: <span className="text-gray-700 normal-case font-bold">{m.name}</span></p>
+                                        <div className="flex flex-wrap gap-2">
+                                          {variantGroups.length === 0 && <p className="text-xs text-gray-400">Belum ada grup varian. Buat dulu di tab Kategori Varian.</p>}
+                                          {variantGroups.map(g => {
+                                            const isLinked = menuVariantGroups.some(mvg => mvg.menu_id === m.id && mvg.group_id === g.id);
+                                            const opts = variantOptions.filter(o => o.group_id === g.id);
+                                            return (
+                                              <button key={g.id} onClick={() => toggleMenuGroupLink(m.id, g.id)}
+                                                className={`flex items-center gap-2 px-3 py-2 rounded-xl border-2 text-xs font-bold transition-all ${isLinked ? 'bg-blue-600 border-blue-600 text-white' : 'bg-white border-gray-200 text-gray-600 hover:border-blue-300'}`}>
+                                                <span className={`w-4 h-4 rounded border-2 flex items-center justify-center ${isLinked ? 'bg-white border-white' : 'border-gray-400'}`}>
+                                                  {isLinked && <span className="text-blue-600 text-[10px] font-black">✓</span>}
+                                                </span>
+                                                <span>{g.name}</span>
+                                                {g.is_required && <span className={`text-[9px] px-1 rounded ${isLinked ? 'bg-blue-500 text-white' : 'bg-red-100 text-red-500'}`}>wajib</span>}
+                                                <span className={`text-[9px] ${isLinked ? 'text-blue-200' : 'text-gray-400'}`}>{opts.length} opsi</span>
+                                              </button>
+                                            );
+                                          })}
+                                        </div>
+                                      </td>
+                                    </tr>
+                                  )}
+                                </React.Fragment>
+                              );
+                            })}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {/* ── SUB-TAB: VARIAN ── */}
+              {masterSubTab === 'VARIAN' && (
+                <div className="space-y-5">
+                  {/* Add Group */}
+                  <div className="bg-white p-5 rounded-3xl border shadow-sm">
+                    <h3 className="font-black text-lg mb-4">Tambah Grup Varian Baru</h3>
+                    <p className="text-xs text-gray-500 mb-3">Contoh grup: "Level Gula", "Pilihan Es", "Pilihan Sambal"</p>
+                    <div className="flex gap-3 flex-wrap">
+                      <ModernInput placeholder="Nama Grup (misal: Level Gula)" value={newGroupName} onChange={e => setNewGroupName(e.target.value)} className="text-sm flex-1 min-w-[200px]" />
+                      <div className="flex items-center gap-2 bg-gray-50 border-2 border-gray-200 rounded-2xl px-4">
+                        <input type="checkbox" id="req-new" checked={newGroupRequired} onChange={e => setNewGroupRequired(e.target.checked)} className="w-4 h-4" />
+                        <label htmlFor="req-new" className="text-sm font-bold text-gray-600 cursor-pointer whitespace-nowrap">Wajib dipilih</label>
+                      </div>
+                      <button onClick={handleAddGroup} className="bg-orange-600 text-white font-black rounded-2xl px-6 py-3 text-sm shadow-md hover:bg-orange-700 active:scale-95">Buat Grup ✅</button>
+                    </div>
+                  </div>
+
+                  {/* Group List */}
+                  {variantGroups.length === 0 && (
+                    <div className="bg-white p-10 rounded-3xl border shadow-sm text-center text-gray-400">
+                      <p className="text-4xl mb-3">🎛</p>
+                      <p className="font-bold">Belum ada grup varian</p>
+                      <p className="text-sm mt-1">Buat grup di atas, lalu tambahkan opsi-opsinya</p>
+                    </div>
+                  )}
+
+                  {variantGroups.map(g => {
+                    const opts = variantOptions.filter(o => o.group_id === g.id);
+                    const linkedMenuCount = menuVariantGroups.filter(mvg => mvg.group_id === g.id).length;
+                    const isExpanded = expandedGroupId === g.id;
+                    return (
+                      <div key={g.id} className="bg-white rounded-3xl border shadow-sm overflow-hidden">
+                        <div className="p-5 flex justify-between items-start cursor-pointer hover:bg-gray-50 transition-colors" onClick={() => setExpandedGroupId(isExpanded ? null : g.id)}>
+                          <div>
+                            <div className="flex items-center gap-2 mb-1">
+                              <h3 className="font-black text-lg">{g.name}</h3>
+                              {g.is_required && <span className="text-[10px] font-bold bg-red-100 text-red-600 px-2 py-0.5 rounded-full">Wajib</span>}
+                            </div>
+                            <p className="text-xs text-gray-500">
+                              {opts.length > 0 ? opts.map(o => o.option_name).join(', ') : 'Belum ada opsi'}
+                              {' · '}
+                              <span className="text-blue-500 font-bold">{linkedMenuCount} menu terhubung</span>
+                            </p>
+                          </div>
+                          <div className="flex items-center gap-2">
+                            <span className="text-gray-400 text-lg">{isExpanded ? '▲' : '▼'}</span>
+                            <button onClick={e => { e.stopPropagation(); handleDeleteGroup(g.id); }} className="bg-red-100 text-red-600 px-3 py-1.5 rounded-xl text-xs font-black hover:bg-red-200">🗑️</button>
+                          </div>
+                        </div>
+
+                        {isExpanded && (
+                          <div className="border-t border-gray-100 p-5">
+                            {/* Opsi list */}
+                            <div className="flex flex-wrap gap-2 mb-4">
+                              {opts.map(opt => (
+                                <div key={opt.id} className="flex items-center gap-2 bg-gray-50 border border-gray-200 rounded-xl px-3 py-2">
+                                  <span className="font-semibold text-sm text-gray-800">{opt.option_name}</span>
+                                  {opt.price_add > 0 && <span className="text-orange-600 font-bold text-xs">+Rp {opt.price_add.toLocaleString('id-ID')}</span>}
+                                  {opt.price_add === 0 && <span className="text-gray-400 text-xs">Gratis</span>}
+                                  <button onClick={() => handleDeleteOption(opt.id)} className="text-red-400 hover:text-red-600 font-black text-sm ml-1">×</button>
+                                </div>
+                              ))}
+                              {opts.length === 0 && <p className="text-xs text-gray-400 italic">Belum ada opsi. Tambah di bawah.</p>}
+                            </div>
+
+                            {/* Add opsi */}
+                            <div className="flex gap-2 flex-wrap items-end bg-gray-50 p-4 rounded-2xl">
+                              <div className="flex-1 min-w-[150px]">
+                                <p className="text-[10px] font-bold text-gray-500 mb-1 uppercase">Nama Opsi</p>
+                                <input placeholder="misal: Manis, Tawar, Pakai Es..." value={newOptName} onChange={e => setNewOptName(e.target.value)}
+                                  onKeyDown={e => e.key === 'Enter' && handleAddOption(g.id)}
+                                  className="w-full border-2 border-gray-200 rounded-xl p-2.5 text-sm font-bold outline-none focus:border-orange-400" />
+                              </div>
+                              <div className="w-28">
+                                <p className="text-[10px] font-bold text-gray-500 mb-1 uppercase">+Harga (Rp)</p>
+                                <input type="number" placeholder="0" value={newOptPrice} onChange={e => setNewOptPrice(e.target.value)}
+                                  className="w-full border-2 border-gray-200 rounded-xl p-2.5 text-sm font-bold outline-none focus:border-orange-400" />
+                              </div>
+                              <button onClick={() => handleAddOption(g.id)} className="bg-orange-600 text-white font-black px-5 py-2.5 rounded-xl text-sm hover:bg-orange-700 transition-colors">+ Tambah Opsi</button>
+                            </div>
+
+                            {/* Menu yang terhubung */}
+                            {linkedMenuCount > 0 && (
+                              <div className="mt-4 pt-4 border-t border-gray-100">
+                                <p className="text-xs font-black text-gray-500 uppercase tracking-wider mb-2">Menu yang pakai varian ini:</p>
+                                <div className="flex flex-wrap gap-1.5">
+                                  {menuVariantGroups.filter(mvg => mvg.group_id === g.id).map(mvg => {
+                                    const menu = menuList.find(m => m.id === mvg.menu_id);
+                                    return menu ? <span key={mvg.id} className="text-xs bg-blue-50 text-blue-700 px-2.5 py-1 rounded-full font-semibold border border-blue-100">{menu.name}</span> : null;
+                                  })}
+                                </div>
+                              </div>
+                            )}
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+          )}
         </div>
 
-        {/* PATCH 6: Notifikasi Status Print ESC/POS Web Bluetooth */}
         {printStatus && (
-          <div className="fixed top-6 left-1/2 transform -translate-x-1/2 bg-blue-600 text-white px-6 py-3 rounded-full shadow-2xl z-[101] flex items-center gap-2">
-            <span className="animate-pulse">🖨️</span>
-            <span className="font-bold text-sm">{printStatus}</span>
+          <div className="fixed top-6 left-1/2 -translate-x-1/2 bg-blue-600 text-white px-5 py-2.5 rounded-full shadow-xl z-[101] flex items-center gap-2 text-sm font-bold">
+            <span className="animate-pulse">🖨️</span> {printStatus}
           </div>
         )}
-
-        {/* Notifikasi Toast Biasa */}
         {toastMessage && (
-          <div className="fixed bottom-10 left-1/2 transform -translate-x-1/2 bg-gray-900 text-white px-6 py-3 rounded-full shadow-2xl z-[100] flex items-center gap-2 animate-bounce">
-            <span className="font-bold text-sm">{toastMessage}</span>
+          <div className="fixed bottom-20 xl:bottom-6 left-1/2 -translate-x-1/2 bg-gray-900 text-white px-5 py-2.5 rounded-full shadow-xl z-[100] text-sm font-bold animate-bounce">
+            {toastMessage}
           </div>
         )}
       </div>
