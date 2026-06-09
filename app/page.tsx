@@ -174,7 +174,7 @@ function VariantModal({ menu, groups, options, menuGroupIds, onAdd, onClose }: {
             <div className="flex items-center gap-2 bg-gray-100 rounded-2xl px-2 py-2 shrink-0">
               <button onClick={() => setQty(q => Math.max(1, q - 1))}
                 className="w-8 h-8 rounded-xl bg-white shadow-sm font-black text-gray-600 hover:text-orange-600 flex items-center justify-center text-lg transition-colors">−</button>
-              <span className="w-6 text-center font-black text-base">{qty}</span>
+              <span className="w-8 text-center font-black text-base text-gray-900">{qty}</span>
               <button onClick={() => setQty(q => q + 1)}
                 className="w-8 h-8 rounded-xl bg-orange-600 text-white font-black flex items-center justify-center text-lg shadow-sm hover:bg-orange-700 transition-colors">+</button>
             </div>
