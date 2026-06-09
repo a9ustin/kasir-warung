@@ -132,6 +132,9 @@ export default function KasirWarung() {
     return 'MENU';
   });
 
+  const [mounted, setMounted] = useState(false);
+  useEffect(() => { setMounted(true); }, []);
+
   const switchTab = (tab: typeof activeTab) => {
     setActiveTab(tab);
     localStorage.setItem('activeTab', tab);
@@ -395,6 +398,7 @@ export default function KasirWarung() {
   const filteredMenu = menuList.filter(m => (activeCategory === 'All' || m.category === activeCategory) && m.name.toLowerCase().includes(searchQuery.toLowerCase()));
 
   // ─── RENDER ──────────────────────────────────────────────
+  if (!mounted) return null;
   return (
     <>
       {variantModal && (
