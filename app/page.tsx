@@ -3,60 +3,24 @@ import React, { useState, useEffect } from 'react';
 import { supabase } from './supabase';
 import { printReceipt, type PrintData } from './escpos-print';
 
-// ─── TYPES ───────────────────────────────────────────────────
 type MenuItem = { id: string; name: string; price: number; category: string };
-
-type VariantGroup = {
-  id: string;
-  name: string;
-  is_required: boolean;
-};
-
-type VariantOption = {
-  id: string;
-  group_id: string;
-  option_name: string;
-  price_add: number;
-};
-
-type MenuVariantGroup = {
-  id: string;
-  menu_id: string;
-  group_id: string;
-};
-
+type VariantGroup = { id: string; name: string; is_required: boolean };
+type VariantOption = { id: string; group_id: string; option_name: string; price_add: number };
+type MenuVariantGroup = { id: string; menu_id: string; group_id: string };
 type SelectedVariant = { group_id: string; group_name: string; option_name: string; price_add: number };
-
 type CartItem = {
-  cartKey: string;
-  id: string;
-  name: string;
-  price: number;
-  category: string;
-  qty: number | '';
-  note: string;
-  isDone: boolean;
-  isCustom?: boolean;
-  orderType: 'Dine In' | 'Take Away';
-  selectedVariants: SelectedVariant[];
-  finalPrice: number;
+  cartKey: string; id: string; name: string; price: number; category: string;
+  qty: number | ''; note: string; isDone: boolean; isCustom?: boolean;
+  orderType: 'Dine In' | 'Take Away'; selectedVariants: SelectedVariant[]; finalPrice: number;
 };
-
 type Order = {
-  id: string;
-  customer_name: string;
-  order_note: string;
-  items: CartItem[];
-  total: number;
+  id: string; customer_name: string; order_note: string; items: CartItem[]; total: number;
   status: 'To Do' | 'In Progress' | 'Done';
-  payment_method: 'Belum Bayar' | 'Cash' | 'QRIS Mandiri' | 'QRIS Gopay';
-  created_at: string;
+  payment_method: 'Belum Bayar' | 'Cash' | 'QRIS Mandiri' | 'QRIS Gopay'; created_at: string;
 };
 
-// ─── HELPERS ─────────────────────────────────────────────────
-function makeCartKey(menuId: string, orderType: string, variants: SelectedVariant[]): string {
-  const vKey = variants.map(v => `${v.group_id}:${v.option_name}`).sort().join('|');
-  return `${menuId}__${orderType}__${vKey}`;
+function makeCartKey(menuId: string, orderType: string, variants: SelectedVariant[]) {
+  return `${menuId}__${orderType}__${variants.map(v => `${v.group_id}:${v.option_name}`).sort().join('|')}`;
 }
 
 const ModernInput = (props: React.InputHTMLAttributes<HTMLInputElement>) => (
@@ -65,73 +29,50 @@ const ModernInput = (props: React.InputHTMLAttributes<HTMLInputElement>) => (
 
 // ─── VARIANT MODAL ───────────────────────────────────────────
 function VariantModal({ menu, groups, options, menuGroupIds, onAdd, onClose }: {
-  menu: MenuItem;
-  groups: VariantGroup[];
-  options: VariantOption[];
-  menuGroupIds: string[];
-  onAdd: (item: CartItem) => void;
-  onClose: () => void;
+  menu: MenuItem; groups: VariantGroup[]; options: VariantOption[];
+  menuGroupIds: string[]; onAdd: (item: CartItem) => void; onClose: () => void;
 }) {
   const [orderType, setOrderType] = useState<'Dine In' | 'Take Away'>('Take Away');
   const [selected, setSelected] = useState<SelectedVariant[]>([]);
   const [note, setNote] = useState('');
   const [qty, setQty] = useState(1);
-
   const activeGroups = groups.filter(g => menuGroupIds.includes(g.id));
-
   const toggle = (group: VariantGroup, opt: VariantOption) => {
     const exists = selected.find(s => s.group_id === group.id && s.option_name === opt.option_name);
-    if (exists) {
-      setSelected(selected.filter(s => !(s.group_id === group.id && s.option_name === opt.option_name)));
-    } else {
-      setSelected([...selected, { group_id: group.id, group_name: group.name, option_name: opt.option_name, price_add: opt.price_add }]);
-    }
+    if (exists) setSelected(selected.filter(s => !(s.group_id === group.id && s.option_name === opt.option_name)));
+    else setSelected([...selected, { group_id: group.id, group_name: group.name, option_name: opt.option_name, price_add: opt.price_add }]);
   };
-
   const extraTotal = selected.reduce((s, v) => s + v.price_add, 0);
   const finalPrice = menu.price + extraTotal;
   const requiredGroups = activeGroups.filter(g => g.is_required);
   const allRequiredFilled = requiredGroups.every(g => selected.some(s => s.group_id === g.id));
   const missingRequired = requiredGroups.filter(g => !selected.some(s => s.group_id === g.id)).map(g => g.name);
-
   const handleAdd = () => {
     if (!allRequiredFilled) return;
-    onAdd({
-      cartKey: makeCartKey(menu.id, orderType, selected),
-      id: menu.id, name: menu.name, price: menu.price, category: menu.category,
-      qty, note, isDone: false, orderType, selectedVariants: selected, finalPrice,
-    });
+    onAdd({ cartKey: makeCartKey(menu.id, orderType, selected), id: menu.id, name: menu.name, price: menu.price, category: menu.category, qty, note, isDone: false, orderType, selectedVariants: selected, finalPrice });
     onClose();
   };
-
   return (
     <div className="fixed inset-0 z-[80] bg-black/50 flex items-end justify-center" onClick={onClose}>
       <div className="bg-white w-full max-w-lg rounded-t-3xl max-h-[90vh] overflow-y-auto" onClick={e => e.stopPropagation()}>
         <div className="flex justify-center pt-3 pb-1"><div className="w-10 h-1 bg-gray-300 rounded-full" /></div>
         <div className="px-5 pt-2 pb-4 border-b border-gray-100">
           <div className="flex justify-between items-start">
-            <div>
-              <h2 className="font-black text-xl text-gray-900">{menu.name}</h2>
-              <p className="text-orange-600 font-bold text-lg mt-0.5">Rp {menu.price.toLocaleString('id-ID')}</p>
-            </div>
+            <div><h2 className="font-black text-xl text-gray-900">{menu.name}</h2>
+              <p className="text-orange-600 font-bold text-lg mt-0.5">Rp {menu.price.toLocaleString('id-ID')}</p></div>
             <button onClick={onClose} className="text-gray-400 text-3xl leading-none">×</button>
           </div>
         </div>
-
-        {/* Order Type */}
         <div className="px-5 py-4 border-b border-gray-100">
           <p className="text-xs font-black text-gray-500 uppercase tracking-wider mb-3">Jenis Pesanan</p>
           <div className="flex gap-3">
             {(['Take Away', 'Dine In'] as const).map(t => (
-              <button key={t} onClick={() => setOrderType(t)}
-                className={`flex-1 py-2.5 rounded-2xl font-bold text-sm border-2 transition-all ${orderType === t ? 'bg-orange-600 border-orange-600 text-white' : 'border-gray-200 text-gray-600'}`}>
+              <button key={t} onClick={() => setOrderType(t)} className={`flex-1 py-2.5 rounded-2xl font-bold text-sm border-2 transition-all ${orderType === t ? 'bg-orange-600 border-orange-600 text-white' : 'border-gray-200 text-gray-600'}`}>
                 {t === 'Take Away' ? '🛍 Bungkus' : '🍽 Makan Sini'}
               </button>
             ))}
           </div>
         </div>
-
-        {/* Variant Groups */}
         {activeGroups.map(group => (
           <div key={group.id} className="px-5 py-4 border-b border-gray-100">
             <div className="flex items-center gap-2 mb-3">
@@ -142,8 +83,7 @@ function VariantModal({ menu, groups, options, menuGroupIds, onAdd, onClose }: {
               {options.filter(o => o.group_id === group.id).map(opt => {
                 const isSelected = selected.some(s => s.group_id === group.id && s.option_name === opt.option_name);
                 return (
-                  <button key={opt.id} onClick={() => toggle(group, opt)}
-                    className={`flex justify-between items-center p-3.5 rounded-2xl border-2 transition-all text-left ${isSelected ? 'border-orange-600 bg-orange-50' : 'border-gray-100 bg-gray-50'}`}>
+                  <button key={opt.id} onClick={() => toggle(group, opt)} className={`flex justify-between items-center p-3.5 rounded-2xl border-2 transition-all text-left ${isSelected ? 'border-orange-600 bg-orange-50' : 'border-gray-100 bg-gray-50'}`}>
                     <div className="flex items-center gap-3">
                       <div className={`w-5 h-5 rounded-md border-2 flex items-center justify-center shrink-0 ${isSelected ? 'bg-orange-600 border-orange-600' : 'border-gray-300 bg-white'}`}>
                         {isSelected && <span className="text-white text-xs font-black">✓</span>}
@@ -159,31 +99,19 @@ function VariantModal({ menu, groups, options, menuGroupIds, onAdd, onClose }: {
             </div>
           </div>
         ))}
-
-        {/* Note */}
         <div className="px-5 py-4 border-b border-gray-100">
           <p className="text-xs font-black text-gray-500 uppercase tracking-wider mb-2">Catatan (Opsional)</p>
-          <input placeholder="Contoh: jangan pedas..." value={note} onChange={e => setNote(e.target.value)}
-            className="w-full bg-gray-50 border-2 border-gray-200 p-3 rounded-2xl text-sm outline-none focus:border-orange-600" />
+          <input placeholder="Contoh: jangan pedas..." value={note} onChange={e => setNote(e.target.value)} className="w-full bg-gray-50 border-2 border-gray-200 p-3 rounded-2xl text-sm outline-none focus:border-orange-600" />
         </div>
-
-        {/* CTA */}
         <div className="px-5 py-4 pb-8">
           <div className="flex gap-3 items-center">
-            {/* Qty Selector */}
             <div className="flex items-center gap-2 bg-gray-100 rounded-2xl px-2 py-2 shrink-0">
-              <button onClick={() => setQty(q => Math.max(1, q - 1))}
-                className="w-8 h-8 rounded-xl bg-white shadow-sm font-black text-gray-600 hover:text-orange-600 flex items-center justify-center text-lg transition-colors">−</button>
+              <button onClick={() => setQty(q => Math.max(1, q - 1))} className="w-8 h-8 rounded-xl bg-white shadow-sm font-black text-gray-600 hover:text-orange-600 flex items-center justify-center text-lg">−</button>
               <span className="w-8 text-center font-black text-base text-gray-900">{qty}</span>
-              <button onClick={() => setQty(q => q + 1)}
-                className="w-8 h-8 rounded-xl bg-orange-600 text-white font-black flex items-center justify-center text-lg shadow-sm hover:bg-orange-700 transition-colors">+</button>
+              <button onClick={() => setQty(q => q + 1)} className="w-8 h-8 rounded-xl bg-orange-600 text-white font-black flex items-center justify-center text-lg shadow-sm hover:bg-orange-700">+</button>
             </div>
-            {/* Add to Cart Button */}
-            <button onClick={handleAdd} disabled={!allRequiredFilled}
-              className={`flex-1 py-4 rounded-2xl font-black text-sm transition-all ${allRequiredFilled ? 'bg-orange-600 text-white shadow-lg active:scale-95' : 'bg-gray-200 text-gray-400 cursor-not-allowed'}`}>
-              {allRequiredFilled
-                ? `Keranjang · Rp ${(finalPrice * qty).toLocaleString('id-ID')}`
-                : `Pilih ${missingRequired.join(', ')} dulu`}
+            <button onClick={handleAdd} disabled={!allRequiredFilled} className={`flex-1 py-4 rounded-2xl font-black text-sm transition-all ${allRequiredFilled ? 'bg-orange-600 text-white shadow-lg active:scale-95' : 'bg-gray-200 text-gray-400 cursor-not-allowed'}`}>
+              {allRequiredFilled ? `Keranjang · Rp ${(finalPrice * qty).toLocaleString('id-ID')}` : `Pilih ${missingRequired.join(', ')} dulu`}
             </button>
           </div>
         </div>
@@ -194,8 +122,25 @@ function VariantModal({ menu, groups, options, menuGroupIds, onAdd, onClose }: {
 
 // ─── MAIN ────────────────────────────────────────────────────
 export default function KasirWarung() {
-  const [activeTab, setActiveTab] = useState<'KASIR' | 'TRACKER' | 'REKAP' | 'MASTER'>('KASIR');
-  const [masterSubTab, setMasterSubTab] = useState<'MENU' | 'VARIAN'>('MENU');
+  // Persist active tab ke localStorage
+  const [activeTab, setActiveTab] = useState<'KASIR' | 'TRACKER' | 'REKAP' | 'MASTER'>(() => {
+    if (typeof window !== 'undefined') return (localStorage.getItem('activeTab') as any) || 'KASIR';
+    return 'KASIR';
+  });
+  const [masterSubTab, setMasterSubTab] = useState<'MENU' | 'VARIAN'>(() => {
+    if (typeof window !== 'undefined') return (localStorage.getItem('masterSubTab') as any) || 'MENU';
+    return 'MENU';
+  });
+
+  const switchTab = (tab: typeof activeTab) => {
+    setActiveTab(tab);
+    localStorage.setItem('activeTab', tab);
+    if (tab !== 'KASIR') clearKasir();
+  };
+  const switchMasterSubTab = (tab: typeof masterSubTab) => {
+    setMasterSubTab(tab);
+    localStorage.setItem('masterSubTab', tab);
+  };
 
   // Data
   const [menuList, setMenuList] = useState<MenuItem[]>([]);
@@ -203,6 +148,13 @@ export default function KasirWarung() {
   const [variantOptions, setVariantOptions] = useState<VariantOption[]>([]);
   const [menuVariantGroups, setMenuVariantGroups] = useState<MenuVariantGroup[]>([]);
   const [orders, setOrders] = useState<Order[]>([]);
+  // Kategori kustom (dari menu + tambahan user)
+  const [customCategories, setCustomCategories] = useState<string[]>(() => {
+    if (typeof window !== 'undefined') {
+      try { return JSON.parse(localStorage.getItem('customCategories') || '[]'); } catch { return []; }
+    }
+    return [];
+  });
 
   // Kasir
   const [cart, setCart] = useState<CartItem[]>([]);
@@ -215,13 +167,10 @@ export default function KasirWarung() {
   const [variantModal, setVariantModal] = useState<MenuItem | null>(null);
   const [customName, setCustomName] = useState('');
   const [customPrice, setCustomPrice] = useState('');
+  const [customOrderType, setCustomOrderType] = useState<'Dine In' | 'Take Away'>('Take Away');
   const [searchQuery, setSearchQuery] = useState('');
   const [activeCategory, setActiveCategory] = useState('All');
-
-  // Tracker
   const [trackerCashGiven, setTrackerCashGiven] = useState<Record<string, string>>({});
-
-  // Rekap
   const [recapFilter, setRecapFilter] = useState<'Hari Ini' | 'Minggu Ini' | 'Semua'>('Hari Ini');
 
   // Master Menu
@@ -230,15 +179,18 @@ export default function KasirWarung() {
   const [editingMenuId, setEditingMenuId] = useState<string | null>(null);
   const [editName, setEditName] = useState('');
   const [editPrice, setEditPrice] = useState('');
+  const [editCategory, setEditCategory] = useState('');
   const [newMenuName, setNewMenuName] = useState('');
   const [newMenuPrice, setNewMenuPrice] = useState('');
   const [newMenuCategory, setNewMenuCategory] = useState('Nasi');
+  const [newCategoryInput, setNewCategoryInput] = useState('');
   const [sortConfig, setSortConfig] = useState<{ key: keyof MenuItem; direction: 'asc' | 'desc' }>({ key: 'category', direction: 'asc' });
 
   // Master Varian
   const [newGroupName, setNewGroupName] = useState('');
   const [newGroupRequired, setNewGroupRequired] = useState(false);
   const [expandedGroupId, setExpandedGroupId] = useState<string | null>(null);
+  const [editingGroupId, setEditingGroupId] = useState<string | null>(null);
   const [newOptName, setNewOptName] = useState('');
   const [newOptPrice, setNewOptPrice] = useState('');
   const [expandedMenuVariantId, setExpandedMenuVariantId] = useState<string | null>(null);
@@ -248,7 +200,7 @@ export default function KasirWarung() {
   const [toastMessage, setToastMessage] = useState<string | null>(null);
   const [dialog, setDialog] = useState<{ isOpen: boolean; message: string; onConfirm: () => void }>({ isOpen: false, message: '', onConfirm: () => {} });
 
-  // ─── FETCH ─────────────────────────────────────────────────
+  // ─── FETCH ───────────────────────────────────────────────
   useEffect(() => {
     fetchAll();
     let t: ReturnType<typeof setTimeout>;
@@ -265,18 +217,33 @@ export default function KasirWarung() {
   const fetchMenuVariantGroups = async () => { const { data } = await supabase.from('menu_variant_groups').select('*'); if (data) setMenuVariantGroups(data); };
   const fetchOrders = async () => { const { data } = await supabase.from('orders').select('*').order('created_at', { ascending: false }); if (data) setOrders(data); };
 
-  // ─── UI HELPERS ────────────────────────────────────────────
   const showToast = (msg: string) => { setToastMessage(msg); setTimeout(() => setToastMessage(null), 1800); };
   const confirmAction = (msg: string, action: () => void) => setDialog({ isOpen: true, message: msg, onConfirm: () => { action(); setDialog(p => ({ ...p, isOpen: false })); } });
 
-  // ─── CART ──────────────────────────────────────────────────
-  const handleMenuClick = (menu: MenuItem) => {
-    setVariantModal(menu);
+  // Gabungan kategori dari menu + custom
+  const allCategories = ['All', ...Array.from(new Set([
+    ...menuList.map(m => m.category),
+    ...customCategories,
+    'Nasi', 'Ala Carte', 'Snack', 'Minuman', 'Tambahan', 'Rokok', 'Sembako'
+  ]))];
+
+  const addCustomCategory = () => {
+    const trimmed = newCategoryInput.trim();
+    if (!trimmed) return showToast('Isi nama kategori!');
+    if (allCategories.includes(trimmed)) return showToast('Kategori sudah ada!');
+    const updated = [...customCategories, trimmed];
+    setCustomCategories(updated);
+    localStorage.setItem('customCategories', JSON.stringify(updated));
+    setNewCategoryInput('');
+    showToast(`Kategori "${trimmed}" ditambah! ✅`);
   };
+
+  // ─── CART ────────────────────────────────────────────────
+  const handleMenuClick = (menu: MenuItem) => setVariantModal(menu);
 
   const addToCartFromModal = (item: CartItem) => {
     const idx = cart.findIndex(c => c.cartKey === item.cartKey);
-    if (idx !== -1) { const nc = [...cart]; nc[idx].qty = Number(nc[idx].qty) + 1; setCart(nc); }
+    if (idx !== -1) { const nc = [...cart]; nc[idx].qty = Number(nc[idx].qty) + Number(item.qty); setCart(nc); }
     else setCart([...cart, item]);
     showToast('Masuk keranjang! 🛒');
   };
@@ -284,7 +251,7 @@ export default function KasirWarung() {
   const addCustomItem = () => {
     if (!customName || !customPrice) return showToast('Isi data dadakan!');
     const key = `custom-${crypto.randomUUID()}`;
-    setCart([...cart, { cartKey: key, id: key, name: customName, price: parseInt(customPrice) || 0, category: 'Dadakan', qty: 1, note: '', isDone: false, isCustom: true, orderType: 'Take Away', selectedVariants: [], finalPrice: parseInt(customPrice) || 0 }]);
+    setCart([...cart, { cartKey: key, id: key, name: customName, price: parseInt(customPrice) || 0, category: 'Dadakan', qty: 1, note: '', isDone: false, isCustom: true, orderType: customOrderType, selectedVariants: [], finalPrice: parseInt(customPrice) || 0 }]);
     setCustomName(''); setCustomPrice(''); showToast('Masuk keranjang!');
   };
 
@@ -302,27 +269,25 @@ export default function KasirWarung() {
     const cleanCart = cart.map(c => ({ ...c, qty: Number(c.qty) || 1 }));
     const orderData = { customer_name: customerName, order_note: orderNote, items: cleanCart, total: totalCart, status: 'To Do', payment_method: paymentMethod };
     const { error } = editingOrderId ? await supabase.from('orders').update(orderData).eq('id', editingOrderId) : await supabase.from('orders').insert([orderData]);
-    if (!error) { clearKasir(); setActiveTab('TRACKER'); showToast('Dikirim ke dapur! 🍳'); } else showToast('Gagal proses!');
+    if (!error) { clearKasir(); switchTab('TRACKER'); showToast('Dikirim ke dapur! 🍳'); } else showToast('Gagal proses!');
   };
 
-  // ─── PRINT ─────────────────────────────────────────────────
+  // ─── PRINT ───────────────────────────────────────────────
   const buildPrintItems = (items: CartItem[]) => items.map(c => ({
     ...c, qty: Number(c.qty) || 1, price: c.finalPrice ?? c.price,
     name: c.selectedVariants?.length > 0 ? `${c.name} (${c.selectedVariants.map(v => v.option_name).join(', ')})` : c.name,
   }));
-
   const handlePrintCart = async () => {
     if (!customerName || cart.length === 0) return showToast('Keranjang kosong!');
     await printReceipt({ created_at: new Date().toISOString(), customer_name: customerName, payment_method: paymentMethod, order_note: orderNote, items: buildPrintItems(cart), total: totalCart, cash_given: parseInt(cashGiven) || 0 },
       msg => { setPrintStatus(msg); setTimeout(() => setPrintStatus(null), 3000); });
   };
-
   const handlePrintOrder = async (order: Order, overrideCash?: string) => {
     await printReceipt({ ...order, items: buildPrintItems(order.items), cash_given: parseInt(overrideCash || '0') },
       msg => { setPrintStatus(msg); setTimeout(() => setPrintStatus(null), 3000); });
   };
 
-  // ─── MASTER MENU ───────────────────────────────────────────
+  // ─── MASTER MENU ─────────────────────────────────────────
   const handleAddMenu = async () => {
     if (!newMenuName || !newMenuPrice) return showToast('Isi data lengkap!');
     const { data, error } = await supabase.from('menus').insert([{ name: newMenuName, price: parseInt(newMenuPrice) || 0, category: newMenuCategory }]).select();
@@ -331,8 +296,11 @@ export default function KasirWarung() {
 
   const handleUpdateMenu = async (id: string) => {
     if (!editName || !editPrice) return showToast('Nama/harga kosong!');
-    await supabase.from('menus').update({ name: editName, price: parseInt(editPrice) || 0 }).eq('id', id);
-    setEditingMenuId(null); fetchMenus(); showToast('Diupdate! ✅');
+    // Optimistic update
+    setMenuList(prev => prev.map(m => m.id === id ? { ...m, name: editName, price: parseInt(editPrice) || 0, category: editCategory } : m));
+    setEditingMenuId(null);
+    showToast('Diupdate! ✅');
+    await supabase.from('menus').update({ name: editName, price: parseInt(editPrice) || 0, category: editCategory }).eq('id', id);
   };
 
   const handleDeleteMenu = (id: string) => confirmAction('Hapus menu ini?', async () => {
@@ -340,14 +308,21 @@ export default function KasirWarung() {
     setMenuList(menuList.filter(m => m.id !== id)); showToast('Dihapus! 🗑️');
   });
 
-  // ─── MASTER VARIAN ─────────────────────────────────────────
+  // ─── MASTER VARIAN ───────────────────────────────────────
   const handleAddGroup = async () => {
     if (!newGroupName) return showToast('Isi nama grup!');
     const { data, error } = await supabase.from('variant_groups').insert([{ name: newGroupName, is_required: newGroupRequired }]).select();
     if (!error && data) { setVariantGroups([...variantGroups, data[0]]); setNewGroupName(''); setNewGroupRequired(false); showToast('Grup ditambah! ✅'); }
   };
 
-  const handleDeleteGroup = (id: string) => confirmAction('Hapus grup varian ini? Semua opsi & koneksi menu akan terhapus.', async () => {
+  const handleToggleRequired = async (group: VariantGroup) => {
+    const newVal = !group.is_required;
+    setVariantGroups(prev => prev.map(g => g.id === group.id ? { ...g, is_required: newVal } : g));
+    await supabase.from('variant_groups').update({ is_required: newVal }).eq('id', group.id);
+    showToast(newVal ? 'Dijadikan wajib ✅' : 'Dijadikan opsional ✅');
+  };
+
+  const handleDeleteGroup = (id: string) => confirmAction('Hapus grup varian ini?', async () => {
     await supabase.from('variant_groups').delete().eq('id', id);
     setVariantGroups(variantGroups.filter(g => g.id !== id));
     setVariantOptions(variantOptions.filter(o => o.group_id !== id));
@@ -377,7 +352,7 @@ export default function KasirWarung() {
     }
   };
 
-  // ─── TRACKER ───────────────────────────────────────────────
+  // ─── TRACKER ─────────────────────────────────────────────
   const updateStatus = async (id: string, s: string) => {
     setOrders(prev => prev.map(o => o.id === id ? { ...o, status: s as Order['status'] } : o));
     await supabase.from('orders').update({ status: s }).eq('id', id);
@@ -405,7 +380,7 @@ export default function KasirWarung() {
     navigator.clipboard.writeText(text); showToast('Disalin!');
   };
 
-  // ─── REKAP ─────────────────────────────────────────────────
+  // ─── REKAP ───────────────────────────────────────────────
   const recapOrders = orders.filter(o => {
     const d = new Date(o.created_at), now = new Date();
     if (recapFilter === 'Hari Ini') return d.toDateString() === now.toDateString();
@@ -417,23 +392,16 @@ export default function KasirWarung() {
   const qrisMandiri = recapOrders.filter(o => o.payment_method === 'QRIS Mandiri').reduce((s, o) => s + o.total, 0);
   const qrisGopay = recapOrders.filter(o => o.payment_method === 'QRIS Gopay').reduce((s, o) => s + o.total, 0);
 
-  const categories = ['All', ...Array.from(new Set(menuList.map(m => m.category)))];
   const filteredMenu = menuList.filter(m => (activeCategory === 'All' || m.category === activeCategory) && m.name.toLowerCase().includes(searchQuery.toLowerCase()));
 
-  // ─── RENDER ────────────────────────────────────────────────
+  // ─── RENDER ──────────────────────────────────────────────
   return (
     <>
       {variantModal && (
-        <VariantModal
-          menu={variantModal}
-          groups={variantGroups}
-          options={variantOptions}
+        <VariantModal menu={variantModal} groups={variantGroups} options={variantOptions}
           menuGroupIds={menuVariantGroups.filter(mvg => mvg.menu_id === variantModal.id).map(mvg => mvg.group_id)}
-          onAdd={addToCartFromModal}
-          onClose={() => setVariantModal(null)}
-        />
+          onAdd={addToCartFromModal} onClose={() => setVariantModal(null)} />
       )}
-
       {dialog.isOpen && (
         <div className="fixed inset-0 z-[100] bg-gray-900/40 backdrop-blur-sm flex items-center justify-center p-4">
           <div className="bg-white p-6 rounded-3xl shadow-2xl w-full max-w-sm border border-gray-100">
@@ -451,11 +419,10 @@ export default function KasirWarung() {
         {/* NAVBAR */}
         <div className="bg-white/90 backdrop-blur-md sticky top-0 z-40 px-4 py-3 border-b border-gray-100 shadow-sm">
           <div className="flex items-center justify-between gap-3 max-w-7xl mx-auto">
-            <h1 className="font-extrabold text-xl tracking-tighter shrink-0 cursor-pointer" onClick={() => setActiveTab('KASIR')}>Warung<span className="text-orange-600">Kasir</span></h1>
+            <h1 className="font-extrabold text-xl tracking-tighter shrink-0 cursor-pointer" onClick={() => switchTab('KASIR')}>Warung<span className="text-orange-600">Kasir</span></h1>
             <div className="flex gap-1.5 bg-gray-100 p-1 rounded-2xl overflow-x-auto hide-scrollbar">
               {(['KASIR', 'TRACKER', 'REKAP', 'MASTER'] as const).map(tab => (
-                <button key={tab} onClick={() => { setActiveTab(tab); if (tab !== 'KASIR') clearKasir(); }}
-                  className={`font-bold px-3 py-2 rounded-xl transition-all whitespace-nowrap text-xs md:text-sm ${activeTab === tab ? 'bg-orange-600 text-white shadow-sm' : 'bg-gray-100 text-gray-700 hover:bg-gray-200'}`}>
+                <button key={tab} onClick={() => switchTab(tab)} className={`font-bold px-3 py-2 rounded-xl transition-all whitespace-nowrap text-xs md:text-sm ${activeTab === tab ? 'bg-orange-600 text-white shadow-sm' : 'bg-gray-100 text-gray-700 hover:bg-gray-200'}`}>
                   {tab === 'KASIR' ? '🛒 Order' : tab === 'TRACKER' ? '🍳 Dapur' : tab === 'REKAP' ? '📈 Rekap' : '⚙️ Menu'}
                 </button>
               ))}
@@ -471,22 +438,18 @@ export default function KasirWarung() {
               <div className="xl:col-span-8">
                 <div className="mb-4"><ModernInput type="text" placeholder="🔍 Cari menu..." className="bg-white" value={searchQuery} onChange={e => setSearchQuery(e.target.value)} /></div>
                 <div className="flex gap-2 overflow-x-auto pb-3 mb-4 hide-scrollbar">
-                  {categories.map(c => (
-                    <button key={c} onClick={() => setActiveCategory(c)}
-                      className={`px-4 py-1.5 rounded-full font-bold whitespace-nowrap border-2 text-sm transition-all ${activeCategory === c ? 'bg-orange-600 border-orange-600 text-white' : 'bg-white border-gray-200 text-gray-600'}`}>{c}</button>
+                  {['All', ...Array.from(new Set(menuList.map(m => m.category)))].map(c => (
+                    <button key={c} onClick={() => setActiveCategory(c)} className={`px-4 py-1.5 rounded-full font-bold whitespace-nowrap border-2 text-sm transition-all ${activeCategory === c ? 'bg-orange-600 border-orange-600 text-white' : 'bg-white border-gray-200 text-gray-600'}`}>{c}</button>
                   ))}
                 </div>
                 <div className="grid grid-cols-3 sm:grid-cols-4 xl:grid-cols-5 gap-2">
                   {filteredMenu.map(m => {
                     const hasVariants = menuVariantGroups.some(mvg => mvg.menu_id === m.id);
                     return (
-                      <button key={m.id} onClick={() => handleMenuClick(m)}
-                        className="bg-white p-3 rounded-2xl border-2 border-gray-100 text-left hover:border-orange-400 active:scale-95 transition-all group relative flex flex-col justify-between shadow-sm">
-                        <div>
-                          <p className="font-bold text-xs leading-snug text-gray-800">{m.name}</p>
-                        </div>
+                      <button key={m.id} onClick={() => handleMenuClick(m)} className="bg-white p-3 rounded-2xl border-2 border-gray-100 text-left hover:border-orange-400 active:scale-95 transition-all group relative flex flex-col justify-between shadow-sm">
+                        <p className="font-bold text-xs leading-snug text-gray-800">{m.name}</p>
                         <div className="flex items-center justify-between mt-2 gap-1">
-                          <p className="font-bold text-xs text-orange-600 whitespace-nowrap">Rp {m.price.toLocaleString('id-ID')}</p>
+                          <p className="text-xs text-orange-600 whitespace-nowrap">Rp {m.price.toLocaleString('id-ID')}</p>
                           {hasVariants && <span className="text-[8px] font-bold bg-blue-100 text-blue-500 px-1 py-0.5 rounded-full shrink-0">var</span>}
                         </div>
                       </button>
@@ -529,12 +492,22 @@ export default function KasirWarung() {
                     ))}
                   </div>
 
+                  {/* Menu Dadakan */}
                   <div className="bg-orange-50 p-3 rounded-2xl border border-orange-100 mb-4">
                     <p className="text-[10px] font-black text-orange-600 uppercase tracking-wider mb-2">⚡ Menu Dadakan</p>
-                    <div className="flex gap-2">
+                    <div className="flex gap-2 mb-2">
                       <input placeholder="Nama item..." value={customName} onChange={e => setCustomName(e.target.value)} className="flex-1 bg-white border border-gray-200 text-xs p-2.5 rounded-xl outline-none focus:border-orange-600 font-bold min-w-0" />
                       <input placeholder="Harga" type="number" value={customPrice} onChange={e => setCustomPrice(e.target.value)} className="w-20 bg-white border border-gray-200 text-xs p-2.5 rounded-xl outline-none font-bold" />
-                      <button onClick={addCustomItem} className="bg-orange-600 text-white font-black px-3 py-2 rounded-xl text-xs">+</button>
+                    </div>
+                    <div className="flex gap-2">
+                      <div className="flex gap-1 flex-1">
+                        {(['Take Away', 'Dine In'] as const).map(t => (
+                          <button key={t} onClick={() => setCustomOrderType(t)} className={`flex-1 py-1.5 rounded-xl text-[10px] font-black border-2 transition-all ${customOrderType === t ? 'bg-orange-600 border-orange-600 text-white' : 'bg-white border-gray-200 text-gray-600'}`}>
+                            {t === 'Take Away' ? '🛍 Bungkus' : '🍽 Sini'}
+                          </button>
+                        ))}
+                      </div>
+                      <button onClick={addCustomItem} className="bg-orange-600 text-white font-black px-4 py-2 rounded-xl text-xs">+</button>
                     </div>
                   </div>
 
@@ -610,18 +583,16 @@ export default function KasirWarung() {
                         <div className="flex flex-col gap-1.5 items-end">
                           <div className="flex gap-1.5">
                             <button onClick={() => handlePrintOrder(o, trackerCashGiven[o.id])} className="text-[11px] bg-blue-100 text-blue-700 px-2 py-1 rounded-lg font-black">🖨️</button>
-                            <button onClick={() => { setEditingOrderId(o.id); setCustomerName(o.customer_name); setCart(o.items); setOrderNote(o.order_note); setPaymentMethod(o.payment_method); setActiveTab('KASIR'); }} className="text-[11px] bg-yellow-400 text-white px-2 py-1 rounded-lg font-bold">Edit</button>
+                            <button onClick={() => { setEditingOrderId(o.id); setCustomerName(o.customer_name); setCart(o.items); setOrderNote(o.order_note); setPaymentMethod(o.payment_method); switchTab('KASIR'); }} className="text-[11px] bg-yellow-400 text-white px-2 py-1 rounded-lg font-bold">Edit</button>
                             <button onClick={() => deleteOrder(o.id)} className="text-[11px] bg-red-500 text-white px-2 py-1 rounded-lg font-bold">Batal</button>
                           </div>
                           <button onClick={() => copyToClipboard(o)} className="text-[10px] bg-green-100 text-green-700 px-2 py-1 rounded-lg font-black border border-green-200">📋 WA</button>
                         </div>
                       </div>
-                      <select value={o.payment_method} onChange={e => updatePayment(o.id, e.target.value)}
-                        className={`text-[10px] font-bold p-1.5 rounded-lg border mb-3 outline-none ${o.payment_method === 'Belum Bayar' ? 'bg-red-50 text-red-600 border-red-200' : 'bg-green-50 text-green-700 border-green-200'}`}>
+                      <select value={o.payment_method} onChange={e => updatePayment(o.id, e.target.value)} className={`text-[10px] font-bold p-1.5 rounded-lg border mb-3 outline-none ${o.payment_method === 'Belum Bayar' ? 'bg-red-50 text-red-600 border-red-200' : 'bg-green-50 text-green-700 border-green-200'}`}>
                         <option value="Belum Bayar">Belum Lunas</option><option value="Cash">Lunas (Cash)</option>
                         <option value="QRIS Mandiri">Lunas (QRIS Mandiri)</option><option value="QRIS Gopay">Lunas (QRIS Gopay)</option>
                       </select>
-
                       {o.payment_method === 'Cash' && (
                         <div className="mb-3 p-3 bg-orange-50 rounded-xl border border-orange-100">
                           <p className="text-[10px] font-bold text-orange-800 mb-1">Kalkulator Kembalian</p>
@@ -639,7 +610,6 @@ export default function KasirWarung() {
                           )}
                         </div>
                       )}
-
                       <div className="space-y-1.5 mb-4 bg-white p-3 rounded-xl border border-gray-100">
                         {o.items.map((it, i) => (
                           <div key={i} className="flex items-start gap-2 cursor-pointer" onClick={() => toggleItemDone(o.id, i)}>
@@ -723,28 +693,41 @@ export default function KasirWarung() {
           {/* ── MASTER ── */}
           {activeTab === 'MASTER' && (
             <div className="pt-5">
-              {/* Sub-tab */}
               <div className="flex gap-2 mb-6 bg-gray-100 p-1 rounded-2xl w-fit">
                 {(['MENU', 'VARIAN'] as const).map(t => (
-                  <button key={t} onClick={() => setMasterSubTab(t)}
-                    className={`px-5 py-2.5 rounded-xl font-black text-sm transition-all ${masterSubTab === t ? 'bg-white text-orange-600 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}>
+                  <button key={t} onClick={() => switchMasterSubTab(t)} className={`px-5 py-2.5 rounded-xl font-black text-sm transition-all ${masterSubTab === t ? 'bg-white text-orange-600 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}>
                     {t === 'MENU' ? '🍽 Menu Utama' : '🎛 Kategori Varian'}
                   </button>
                 ))}
               </div>
 
-              {/* ── SUB-TAB: MENU ── */}
+              {/* ── MENU ── */}
               {masterSubTab === 'MENU' && (
                 <div className="space-y-5">
                   <div className="bg-white p-5 rounded-3xl border shadow-sm">
                     <h3 className="font-black text-lg mb-4">Tambah Menu Baru</h3>
                     <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
                       <select value={newMenuCategory} onChange={e => setNewMenuCategory(e.target.value)} className="bg-gray-50 border-2 border-gray-200 rounded-2xl p-3 font-bold outline-none focus:border-orange-600 text-sm">
-                        {['Nasi', 'Ala Carte', 'Snack', 'Minuman', 'Tambahan', 'Rokok', 'Sembako'].map(c => <option key={c}>{c}</option>)}
+                        {allCategories.filter(c => c !== 'All').map(c => <option key={c}>{c}</option>)}
                       </select>
                       <ModernInput placeholder="Nama Menu" value={newMenuName} onChange={e => setNewMenuName(e.target.value)} className="text-sm" />
                       <ModernInput placeholder="Harga" type="number" value={newMenuPrice} onChange={e => setNewMenuPrice(e.target.value)} className="text-sm" />
                       <button onClick={handleAddMenu} className="bg-orange-600 text-white font-black rounded-2xl py-3 text-sm shadow-md hover:bg-orange-700 active:scale-95">Simpan 💾</button>
+                    </div>
+                  </div>
+
+                  {/* Tambah Kategori Baru */}
+                  <div className="bg-white p-5 rounded-3xl border shadow-sm">
+                    <h3 className="font-black text-base mb-3">➕ Tambah Kategori Baru</h3>
+                    <div className="flex gap-3">
+                      <ModernInput placeholder="Nama kategori baru (misal: Mie, Jus, Paket)" value={newCategoryInput} onChange={e => setNewCategoryInput(e.target.value)}
+                        onKeyDown={e => e.key === 'Enter' && addCustomCategory()} className="text-sm" />
+                      <button onClick={addCustomCategory} className="bg-orange-600 text-white font-black rounded-2xl px-5 py-3 text-sm shadow-md hover:bg-orange-700 shrink-0">Tambah</button>
+                    </div>
+                    <div className="flex flex-wrap gap-2 mt-3">
+                      {allCategories.filter(c => c !== 'All').map(c => (
+                        <span key={c} className="text-xs bg-gray-100 text-gray-600 px-3 py-1.5 rounded-full font-bold">{c}</span>
+                      ))}
                     </div>
                   </div>
 
@@ -753,7 +736,7 @@ export default function KasirWarung() {
                       <h3 className="font-black text-lg shrink-0">Daftar Menu</h3>
                       <div className="flex gap-2 md:ml-auto w-full md:w-auto">
                         <select value={masterCategoryFilter} onChange={e => setMasterCategoryFilter(e.target.value)} className="bg-gray-50 border-2 border-gray-200 rounded-xl p-2 font-bold outline-none text-sm">
-                          <option value="All">Semua</option>{categories.filter(c => c !== 'All').map(c => <option key={c}>{c}</option>)}
+                          <option value="All">Semua</option>{allCategories.filter(c => c !== 'All').map(c => <option key={c}>{c}</option>)}
                         </select>
                         <ModernInput placeholder="Cari..." value={masterSearch} onChange={e => setMasterSearch(e.target.value)} className="text-sm" />
                       </div>
@@ -773,17 +756,24 @@ export default function KasirWarung() {
                             .map(m => {
                               const linkedGroups = menuVariantGroups.filter(mvg => mvg.menu_id === m.id).map(mvg => variantGroups.find(g => g.id === mvg.group_id)).filter(Boolean) as VariantGroup[];
                               const isExpanded = expandedMenuVariantId === m.id;
+                              const isEditing = editingMenuId === m.id;
                               return (
                                 <React.Fragment key={m.id}>
                                   <tr className="border-b hover:bg-gray-50 transition-colors">
-                                    <td className="p-4"><span className="text-[10px] font-black bg-gray-100 text-gray-600 px-2 py-0.5 rounded-full uppercase">{m.category}</span></td>
+                                    <td className="p-4">
+                                      {isEditing
+                                        ? <select value={editCategory} onChange={e => setEditCategory(e.target.value)} className="border-2 border-orange-300 rounded-lg p-1 outline-none font-bold text-sm">
+                                          {allCategories.filter(c => c !== 'All').map(c => <option key={c}>{c}</option>)}
+                                        </select>
+                                        : <span className="text-[10px] font-black bg-gray-100 text-gray-600 px-2 py-0.5 rounded-full uppercase">{m.category}</span>}
+                                    </td>
                                     <td className="p-4 font-black text-sm">
-                                      {editingMenuId === m.id
+                                      {isEditing
                                         ? <input className="border-2 border-orange-300 rounded-lg p-1 w-full outline-none font-bold" value={editName} onChange={e => setEditName(e.target.value)} />
                                         : m.name}
                                     </td>
                                     <td className="p-4 font-bold text-sm text-gray-600">
-                                      {editingMenuId === m.id
+                                      {isEditing
                                         ? <div className="flex gap-2">
                                           <input type="number" className="border-2 border-orange-300 rounded-lg p-1 w-24 outline-none font-bold" value={editPrice} onChange={e => setEditPrice(e.target.value)} autoFocus />
                                           <button onClick={() => handleUpdateMenu(m.id)} className="bg-green-500 text-white px-2 py-1 rounded-lg text-xs font-black">OK</button>
@@ -791,13 +781,12 @@ export default function KasirWarung() {
                                         </div>
                                         : <div className="flex items-center gap-2">
                                           <span>Rp {m.price.toLocaleString('id-ID')}</span>
-                                          <button onClick={() => { setEditingMenuId(m.id); setEditPrice(m.price.toString()); setEditName(m.name); }} className="text-blue-500 text-xs font-black hover:underline">✏️</button>
+                                          <button onClick={() => { setEditingMenuId(m.id); setEditPrice(m.price.toString()); setEditName(m.name); setEditCategory(m.category); }} className="text-blue-500 text-xs font-black hover:underline">✏️</button>
                                         </div>}
                                     </td>
                                     <td className="p-4 text-center">
-                                      <button onClick={() => setExpandedMenuVariantId(isExpanded ? null : m.id)}
-                                        className={`text-xs font-black px-3 py-1.5 rounded-lg transition-colors ${linkedGroups.length > 0 ? 'bg-blue-100 text-blue-700 hover:bg-blue-200' : 'bg-gray-100 text-gray-500 hover:bg-gray-200'}`}>
-                                        {linkedGroups.length > 0 ? `${linkedGroups.map(g => g.name).join(', ')}` : 'Tidak ada'}
+                                      <button onClick={() => setExpandedMenuVariantId(isExpanded ? null : m.id)} className={`text-xs font-black px-3 py-1.5 rounded-lg transition-colors ${linkedGroups.length > 0 ? 'bg-blue-100 text-blue-700 hover:bg-blue-200' : 'bg-gray-100 text-gray-500 hover:bg-gray-200'}`}>
+                                        {linkedGroups.length > 0 ? linkedGroups.map(g => g.name).join(', ') : 'Tidak ada'}
                                       </button>
                                     </td>
                                     <td className="p-4 text-center">
@@ -809,13 +798,12 @@ export default function KasirWarung() {
                                       <td colSpan={5} className="px-6 py-4">
                                         <p className="text-xs font-black text-blue-700 uppercase tracking-wider mb-3">Hubungkan varian ke: <span className="text-gray-700 normal-case font-bold">{m.name}</span></p>
                                         <div className="flex flex-wrap gap-2">
-                                          {variantGroups.length === 0 && <p className="text-xs text-gray-400">Belum ada grup varian. Buat dulu di tab Kategori Varian.</p>}
+                                          {variantGroups.length === 0 && <p className="text-xs text-gray-400">Belum ada grup varian.</p>}
                                           {variantGroups.map(g => {
                                             const isLinked = menuVariantGroups.some(mvg => mvg.menu_id === m.id && mvg.group_id === g.id);
                                             const opts = variantOptions.filter(o => o.group_id === g.id);
                                             return (
-                                              <button key={g.id} onClick={() => toggleMenuGroupLink(m.id, g.id)}
-                                                className={`flex items-center gap-2 px-3 py-2 rounded-xl border-2 text-xs font-bold transition-all ${isLinked ? 'bg-blue-600 border-blue-600 text-white' : 'bg-white border-gray-200 text-gray-600 hover:border-blue-300'}`}>
+                                              <button key={g.id} onClick={() => toggleMenuGroupLink(m.id, g.id)} className={`flex items-center gap-2 px-3 py-2 rounded-xl border-2 text-xs font-bold transition-all ${isLinked ? 'bg-blue-600 border-blue-600 text-white' : 'bg-white border-gray-200 text-gray-600 hover:border-blue-300'}`}>
                                                 <span className={`w-4 h-4 rounded border-2 flex items-center justify-center ${isLinked ? 'bg-white border-white' : 'border-gray-400'}`}>
                                                   {isLinked && <span className="text-blue-600 text-[10px] font-black">✓</span>}
                                                 </span>
@@ -839,15 +827,14 @@ export default function KasirWarung() {
                 </div>
               )}
 
-              {/* ── SUB-TAB: VARIAN ── */}
+              {/* ── VARIAN ── */}
               {masterSubTab === 'VARIAN' && (
                 <div className="space-y-5">
-                  {/* Add Group */}
                   <div className="bg-white p-5 rounded-3xl border shadow-sm">
-                    <h3 className="font-black text-lg mb-4">Tambah Grup Varian Baru</h3>
-                    <p className="text-xs text-gray-500 mb-3">Contoh grup: "Level Gula", "Pilihan Es", "Pilihan Sambal"</p>
+                    <h3 className="font-black text-lg mb-1">Tambah Grup Varian Baru</h3>
+                    <p className="text-xs text-gray-500 mb-3">Contoh: "Level Gula", "Pilihan Es", "Pilihan Sambal"</p>
                     <div className="flex gap-3 flex-wrap">
-                      <ModernInput placeholder="Nama Grup (misal: Level Gula)" value={newGroupName} onChange={e => setNewGroupName(e.target.value)} className="text-sm flex-1 min-w-[200px]" />
+                      <ModernInput placeholder="Nama Grup" value={newGroupName} onChange={e => setNewGroupName(e.target.value)} className="text-sm flex-1 min-w-[200px]" />
                       <div className="flex items-center gap-2 bg-gray-50 border-2 border-gray-200 rounded-2xl px-4">
                         <input type="checkbox" id="req-new" checked={newGroupRequired} onChange={e => setNewGroupRequired(e.target.checked)} className="w-4 h-4" />
                         <label htmlFor="req-new" className="text-sm font-bold text-gray-600 cursor-pointer whitespace-nowrap">Wajib dipilih</label>
@@ -856,12 +843,9 @@ export default function KasirWarung() {
                     </div>
                   </div>
 
-                  {/* Group List */}
                   {variantGroups.length === 0 && (
                     <div className="bg-white p-10 rounded-3xl border shadow-sm text-center text-gray-400">
-                      <p className="text-4xl mb-3">🎛</p>
-                      <p className="font-bold">Belum ada grup varian</p>
-                      <p className="text-sm mt-1">Buat grup di atas, lalu tambahkan opsi-opsinya</p>
+                      <p className="text-4xl mb-3">🎛</p><p className="font-bold">Belum ada grup varian</p>
                     </div>
                   )}
 
@@ -871,56 +855,50 @@ export default function KasirWarung() {
                     const isExpanded = expandedGroupId === g.id;
                     return (
                       <div key={g.id} className="bg-white rounded-3xl border shadow-sm overflow-hidden">
-                        <div className="p-5 flex justify-between items-start cursor-pointer hover:bg-gray-50 transition-colors" onClick={() => setExpandedGroupId(isExpanded ? null : g.id)}>
+                        <div className="p-5 flex justify-between items-start cursor-pointer hover:bg-gray-50" onClick={() => setExpandedGroupId(isExpanded ? null : g.id)}>
                           <div>
-                            <div className="flex items-center gap-2 mb-1">
+                            <div className="flex items-center gap-2 mb-1 flex-wrap">
                               <h3 className="font-black text-lg">{g.name}</h3>
-                              {g.is_required && <span className="text-[10px] font-bold bg-red-100 text-red-600 px-2 py-0.5 rounded-full">Wajib</span>}
+                              {/* Toggle wajib/opsional langsung */}
+                              <button onClick={e => { e.stopPropagation(); handleToggleRequired(g); }}
+                                className={`text-[10px] font-bold px-2.5 py-1 rounded-full transition-all ${g.is_required ? 'bg-red-100 text-red-600 hover:bg-red-200' : 'bg-gray-100 text-gray-500 hover:bg-gray-200'}`}>
+                                {g.is_required ? '🔴 Wajib (klik jadi opsional)' : '⚪ Opsional (klik jadi wajib)'}
+                              </button>
                             </div>
                             <p className="text-xs text-gray-500">
-                              {opts.length > 0 ? opts.map(o => o.option_name).join(', ') : 'Belum ada opsi'}
-                              {' · '}
-                              <span className="text-blue-500 font-bold">{linkedMenuCount} menu terhubung</span>
+                              {opts.length > 0 ? opts.map(o => o.option_name).join(', ') : 'Belum ada opsi'} · <span className="text-blue-500 font-bold">{linkedMenuCount} menu terhubung</span>
                             </p>
                           </div>
                           <div className="flex items-center gap-2">
-                            <span className="text-gray-400 text-lg">{isExpanded ? '▲' : '▼'}</span>
+                            <span className="text-gray-400">{isExpanded ? '▲' : '▼'}</span>
                             <button onClick={e => { e.stopPropagation(); handleDeleteGroup(g.id); }} className="bg-red-100 text-red-600 px-3 py-1.5 rounded-xl text-xs font-black hover:bg-red-200">🗑️</button>
                           </div>
                         </div>
-
                         {isExpanded && (
                           <div className="border-t border-gray-100 p-5">
-                            {/* Opsi list */}
                             <div className="flex flex-wrap gap-2 mb-4">
                               {opts.map(opt => (
                                 <div key={opt.id} className="flex items-center gap-2 bg-gray-50 border border-gray-200 rounded-xl px-3 py-2">
                                   <span className="font-semibold text-sm text-gray-800">{opt.option_name}</span>
-                                  {opt.price_add > 0 && <span className="text-orange-600 font-bold text-xs">+Rp {opt.price_add.toLocaleString('id-ID')}</span>}
-                                  {opt.price_add === 0 && <span className="text-gray-400 text-xs">Gratis</span>}
-                                  <button onClick={() => handleDeleteOption(opt.id)} className="text-red-400 hover:text-red-600 font-black text-sm ml-1">×</button>
+                                  {opt.price_add > 0 ? <span className="text-orange-600 font-bold text-xs">+Rp {opt.price_add.toLocaleString('id-ID')}</span> : <span className="text-gray-400 text-xs">Gratis</span>}
+                                  <button onClick={() => handleDeleteOption(opt.id)} className="text-red-400 hover:text-red-600 font-black ml-1">×</button>
                                 </div>
                               ))}
-                              {opts.length === 0 && <p className="text-xs text-gray-400 italic">Belum ada opsi. Tambah di bawah.</p>}
+                              {opts.length === 0 && <p className="text-xs text-gray-400 italic">Belum ada opsi.</p>}
                             </div>
-
-                            {/* Add opsi */}
                             <div className="flex gap-2 flex-wrap items-end bg-gray-50 p-4 rounded-2xl">
                               <div className="flex-1 min-w-[150px]">
                                 <p className="text-[10px] font-bold text-gray-500 mb-1 uppercase">Nama Opsi</p>
-                                <input placeholder="misal: Manis, Tawar, Pakai Es..." value={newOptName} onChange={e => setNewOptName(e.target.value)}
+                                <input placeholder="misal: Manis, Tawar..." value={newOptName} onChange={e => setNewOptName(e.target.value)}
                                   onKeyDown={e => e.key === 'Enter' && handleAddOption(g.id)}
                                   className="w-full border-2 border-gray-200 rounded-xl p-2.5 text-sm font-bold outline-none focus:border-orange-400" />
                               </div>
                               <div className="w-28">
                                 <p className="text-[10px] font-bold text-gray-500 mb-1 uppercase">+Harga (Rp)</p>
-                                <input type="number" placeholder="0" value={newOptPrice} onChange={e => setNewOptPrice(e.target.value)}
-                                  className="w-full border-2 border-gray-200 rounded-xl p-2.5 text-sm font-bold outline-none focus:border-orange-400" />
+                                <input type="number" placeholder="0" value={newOptPrice} onChange={e => setNewOptPrice(e.target.value)} className="w-full border-2 border-gray-200 rounded-xl p-2.5 text-sm font-bold outline-none focus:border-orange-400" />
                               </div>
-                              <button onClick={() => handleAddOption(g.id)} className="bg-orange-600 text-white font-black px-5 py-2.5 rounded-xl text-sm hover:bg-orange-700 transition-colors">+ Tambah Opsi</button>
+                              <button onClick={() => handleAddOption(g.id)} className="bg-orange-600 text-white font-black px-5 py-2.5 rounded-xl text-sm hover:bg-orange-700">+ Tambah Opsi</button>
                             </div>
-
-                            {/* Menu yang terhubung */}
                             {linkedMenuCount > 0 && (
                               <div className="mt-4 pt-4 border-t border-gray-100">
                                 <p className="text-xs font-black text-gray-500 uppercase tracking-wider mb-2">Menu yang pakai varian ini:</p>
