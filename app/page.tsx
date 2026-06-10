@@ -100,8 +100,8 @@ function VariantModal({ menu, groups, options, menuGroupIds, onAdd, onClose }: {
           </div>
         ))}
         <div className="px-5 py-4 border-b border-gray-100">
-          <p className="text-xs font-black text-black-500 uppercase tracking-wider mb-2">Catatan (Opsional)</p>
-          <input placeholder="Contoh: jangan pedas..." value={note} onChange={e => setNote(e.target.value)} className="w-full bg-black-50 border-2 border-gray-200 p-3 rounded-2xl text-sm outline-none focus:border-orange-600" />
+          <p className="text-xs font-black text-gray-900 uppercase tracking-wider mb-2">Catatan (Opsional)</p>
+          <input placeholder="Contoh: jangan pedas..." value={note} onChange={e => setNote(e.target.value)} className="w-full bg-white border-2 border-gray-200 p-3 rounded-2xl text-sm text-gray-900 outline-none focus:border-orange-600" />
         </div>
         <div className="px-5 py-4 pb-8">
           <div className="flex gap-3 items-center">
