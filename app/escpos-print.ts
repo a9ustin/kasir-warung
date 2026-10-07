@@ -22,7 +22,7 @@ const cmd = {
   BOLD_ON:      [ESC, 0x45, 0x01],
   BOLD_OFF:     [ESC, 0x45, 0x00],
   FONT_NORMAL:  [GS,  0x21, 0x00],
-  FONT_MEDIUM:  [GS,  0x21, 0x11],
+  FONT_MEDIUM:  [GS,  0x21, 0x00], // Diubah agar size sama dengan NORMAL
   FEED_CUT:     [GS,  0x56, 0x42, 0x10],
   LF:           [0x0a],
 };
@@ -69,7 +69,10 @@ export function buildReceipt(data: PrintData): Uint8Array {
   const nl  = () => add(cmd.LF);
 
   add(cmd.INIT);
-  add(cmd.ALIGN_CENTER, cmd.FONT_MEDIUM, cmd.BOLD_ON);
+  add(cmd.ALIGN_CENTER, cmd.FONT_NORMAL, cmd.BOLD_ON);
+  // (Opsional) Jika printer sudah disetting NV Logo, bisa dipanggil di sini, 
+  // contoh: add([0x1c, 0x70, 0x01, 0x00]); // Print NV Logo No 1
+  
   add('KEDAI BU SABAR\n');
   add(cmd.FONT_NORMAL, cmd.BOLD_OFF);
   add('Duwet Lor RT 02 RW 16 Baturetno\n');
@@ -101,7 +104,7 @@ export function buildReceipt(data: PrintData): Uint8Array {
   }
 
   add('--------------------------------\n');
-  add(cmd.BOLD_ON, cmd.FONT_MEDIUM);
+  add(cmd.BOLD_ON, cmd.FONT_NORMAL);
   add(padRow('TOTAL', `Rp ${data.total.toLocaleString('id-ID')}`) + '\n');
   add(cmd.FONT_NORMAL, cmd.BOLD_OFF);
 
@@ -218,14 +221,18 @@ function printViaHTML(data: PrintData): void {
     <div class="item-row bold"><span>Kembali</span><span>Rp ${Math.max(0, data.cash_given! - data.total).toLocaleString('id-ID')}</span></div>
   ` : '';
 
+  // Pastikan URL gambar diambil dari root origin supaya terbaca di iframe
+  const logoUrl = `${window.location.origin}/logo.png`;
+
   const html = `<!DOCTYPE html>
 <html>
 <head>
 <meta charset="UTF-8">
+<link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;700&display=swap" rel="stylesheet">
 <style>
   * { margin: 0; padding: 0; box-sizing: border-box; }
   body {
-    font-family: 'Courier New', Courier, monospace;
+    font-family: 'Plus Jakarta Sans', sans-serif;
     font-size: 12px;
     width: 58mm;
     color: #000;
@@ -234,20 +241,35 @@ function printViaHTML(data: PrintData): void {
   }
   .center { text-align: center; }
   .bold { font-weight: bold; }
-  .store-name { font-size: 15px; font-weight: bold; text-align: center; margin: 4px 0 2px; }
-  .store-info { font-size: 10px; text-align: center; }
+  
+  .logo-container {
+    text-align: center;
+    margin-bottom: 4px;
+  }
+  .logo-container img {
+    width: 35mm; /* Sesuaikan ukuran logo di sini */
+    max-width: 100%;
+    object-fit: contain;
+    filter: grayscale(100%); /* Membuat logo jadi hitam putih khas printer thermal */
+  }
+
+  .store-name { font-weight: bold; text-align: center; margin: 4px 0 2px; }
+  .store-info { text-align: center; }
   .divider { border-top: 1px dashed #000; margin: 6px 0; }
-  .info-row { margin: 2px 0; font-size: 11px; }
+  .info-row { margin: 2px 0; }
   .item { margin: 4px 0; }
-  .item-name { font-weight: bold; font-size: 12px; }
-  .note { font-size: 10px; padding-left: 4px; }
-  .item-row { display: flex; justify-content: space-between; font-size: 11px; padding-left: 4px; }
-  .total-row { display: flex; justify-content: space-between; font-weight: bold; font-size: 14px; margin: 4px 0; }
+  .item-name { font-weight: bold; }
+  .note { padding-left: 4px; }
+  .item-row { display: flex; justify-content: space-between; padding-left: 4px; }
+  .total-row { display: flex; justify-content: space-between; font-weight: bold; margin: 4px 0; }
   .footer { text-align: center; font-weight: bold; margin-top: 8px; }
   @page { margin: 0; size: 58mm auto; }
 </style>
 </head>
 <body>
+  <div class="logo-container">
+    <img src="${logoUrl}" alt="Logo" />
+  </div>
   <div class="store-name">KEDAI BU SABAR</div>
   <div class="store-info">Duwet Lor RT 02 RW 16 Baturetno</div>
   <div class="store-info">083811014351</div>
@@ -272,11 +294,12 @@ function printViaHTML(data: PrintData): void {
   iframe.contentDocument!.write(html);
   iframe.contentDocument!.close();
 
+  // Tambah delay lebih panjang sedikit agar gambar punya waktu untuk ter-load sebelum print
   setTimeout(() => {
     iframe.contentWindow!.focus();
     iframe.contentWindow!.print();
     setTimeout(() => document.body.removeChild(iframe), 1000);
-  }, 300);
+  }, 1000); 
 }
 
 // ============================================================
