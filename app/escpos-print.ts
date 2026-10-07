@@ -70,9 +70,6 @@ export function buildReceipt(data: PrintData): Uint8Array {
 
   add(cmd.INIT);
   add(cmd.ALIGN_CENTER, cmd.FONT_NORMAL, cmd.BOLD_ON);
-  // (Opsional) Jika printer sudah disetting NV Logo, bisa dipanggil di sini, 
-  // contoh: add([0x1c, 0x70, 0x01, 0x00]); // Print NV Logo No 1
-  
   add('KEDAI BU SABAR\n');
   add(cmd.FONT_NORMAL, cmd.BOLD_OFF);
   add('Duwet Lor RT 02 RW 16 Baturetno\n');
@@ -221,18 +218,14 @@ function printViaHTML(data: PrintData): void {
     <div class="item-row bold"><span>Kembali</span><span>Rp ${Math.max(0, data.cash_given! - data.total).toLocaleString('id-ID')}</span></div>
   ` : '';
 
-  // Pastikan URL gambar diambil dari root origin supaya terbaca di iframe
-  const logoUrl = `${window.location.origin}/logo.png`;
-
   const html = `<!DOCTYPE html>
 <html>
 <head>
 <meta charset="UTF-8">
-<link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;700&display=swap" rel="stylesheet">
 <style>
   * { margin: 0; padding: 0; box-sizing: border-box; }
   body {
-    font-family: 'Plus Jakarta Sans', sans-serif;
+    font-family: 'Courier New', Courier, monospace;
     font-size: 12px;
     width: 58mm;
     color: #000;
@@ -241,18 +234,8 @@ function printViaHTML(data: PrintData): void {
   }
   .center { text-align: center; }
   .bold { font-weight: bold; }
-  
-  .logo-container {
-    text-align: center;
-    margin-bottom: 4px;
-  }
-  .logo-container img {
-    width: 35mm; /* Sesuaikan ukuran logo di sini */
-    max-width: 100%;
-    object-fit: contain;
-    filter: grayscale(100%); /* Membuat logo jadi hitam putih khas printer thermal */
-  }
-
+  /* Semua size disamakan mengikuti inheritance dari body (12px), 
+     kecuali dibatasi dengan font-weight saja */
   .store-name { font-weight: bold; text-align: center; margin: 4px 0 2px; }
   .store-info { text-align: center; }
   .divider { border-top: 1px dashed #000; margin: 6px 0; }
@@ -267,9 +250,6 @@ function printViaHTML(data: PrintData): void {
 </style>
 </head>
 <body>
-  <div class="logo-container">
-    <img src="${logoUrl}" alt="Logo" />
-  </div>
   <div class="store-name">KEDAI BU SABAR</div>
   <div class="store-info">Duwet Lor RT 02 RW 16 Baturetno</div>
   <div class="store-info">083811014351</div>
@@ -294,12 +274,11 @@ function printViaHTML(data: PrintData): void {
   iframe.contentDocument!.write(html);
   iframe.contentDocument!.close();
 
-  // Tambah delay lebih panjang sedikit agar gambar punya waktu untuk ter-load sebelum print
   setTimeout(() => {
     iframe.contentWindow!.focus();
     iframe.contentWindow!.print();
     setTimeout(() => document.body.removeChild(iframe), 1000);
-  }, 1000); 
+  }, 300); 
 }
 
 // ============================================================
